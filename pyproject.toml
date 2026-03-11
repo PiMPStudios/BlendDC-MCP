@@ -1,0 +1,18 @@
+[project]
+name = "blender-mcp"
+version = "1.0.0"
+description = "Universal Blender MCP server for Continue, LM Studio, Cursor"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "mcp>=1.0.0",           # Official MCP SDK (handles handshake perfectly)
+    "numpy",
+]
+
+[tool.uv]
+dev-dependencies = ["black", "ruff"]
+
+[project.scripts]
+blender-mcp = "blender_mcp.server.main:main"
