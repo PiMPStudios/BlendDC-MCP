@@ -134,30 +134,120 @@ curl -X POST http://127.0.0.1:8400/mcp \
 
 ---
 
-## Available Tools
+## Available Tools (54)
 
+### Objects
 | Tool | Description |
 |------|-------------|
 | `list_objects` | List all objects in the scene |
-| `get_object_info` | Get location, rotation, scale, type, dimensions |
+| `get_object_info` | Get location, rotation, scale, type, dimensions, visibility |
 | `create_object` | Add a primitive (cube, sphere, cylinder, plane, cone, torus) |
 | `delete_object` | Remove an object by name |
+| `rename_object` | Rename an object |
+| `duplicate_object` | Copy an object |
+| `join_objects` | Join a list of mesh objects into one |
+| `parent_objects` | Set a parent-child relationship between two objects |
 | `move_object` | Set absolute world-space location |
 | `rotate_object` | Set rotation in radians (XYZ Euler) |
 | `scale_object` | Scale per-axis |
-| `duplicate_object` | Copy an object |
+| `apply_transforms` | Apply location / rotation / scale to mesh data |
+| `set_origin` | Move the object origin (to geometry, cursor, mass centre…) |
 | `set_object_visibility` | Show / hide in viewport and render |
 | `set_active_object` | Select and make active |
+
+### Selection
+| Tool | Description |
+|------|-------------|
+| `get_selected_objects` | Return names of currently selected objects |
+| `select_objects` | Select a list of objects by name |
+
+### Materials
+| Tool | Description |
+|------|-------------|
+| `list_materials` | List all materials in the file |
 | `assign_material` | Create or assign a material with a base color |
 | `set_material_color` | Update the Base Color of an existing material |
+| `set_material_property` | Set Metallic, Roughness, Emission Strength, etc. |
+| `delete_material` | Remove a material |
+
+### Lights
+| Tool | Description |
+|------|-------------|
 | `add_light` | Add POINT / SUN / SPOT / AREA light |
-| `add_modifier` | Add a modifier (SUBSURF, BEVEL, SOLIDIFY, MIRROR…) |
+
+### Camera
+| Tool | Description |
+|------|-------------|
+| `add_camera` | Add a new camera |
+| `set_active_camera` | Set which camera is used for rendering |
+| `set_camera_properties` | Adjust focal length and clip distances |
+| `point_camera_at` | Add a Track-To constraint to aim a camera at an object |
+
+### Modifiers
+| Tool | Description |
+|------|-------------|
+| `add_modifier` | Add a modifier (SUBSURF, BEVEL, SOLIDIFY, MIRROR, ARRAY…) |
+| `list_modifiers` | List all modifiers on an object |
+| `set_modifier_property` | Change any modifier property by attribute name |
 | `apply_modifier` | Collapse a modifier into the mesh |
-| `get_scene_info` | Scene name, frame range, FPS, render settings |
+
+### Animation
+| Tool | Description |
+|------|-------------|
 | `set_scene_frame` | Jump to an animation frame |
-| `render_preview` | OpenGL viewport render → returns PNG path |
+| `set_frame_range` | Set scene start and end frames |
+| `insert_keyframe` | Insert a keyframe for location / rotation / scale |
+| `get_keyframes` | List all keyframes on an object grouped by data path |
+
+### Rendering
+| Tool | Description |
+|------|-------------|
+| `render_preview` | Fast OpenGL viewport render → returns PNG path |
+| `full_render` | Full CPU/GPU render → saves to output path |
+| `set_render_engine` | Switch between EEVEE, Cycles, Workbench |
+| `set_render_resolution` | Set render width, height, and percentage |
+| `set_render_output` | Set output file path and format |
+
+### Scene & World
+| Tool | Description |
+|------|-------------|
+| `get_scene_info` | Scene name, frame range, FPS, object count, render settings |
 | `clear_scene` | Remove all (or all non-camera/light) objects |
 | `save_file` | Save the current .blend file |
+| `set_world_color` | Set the world background to a solid color |
+
+### Collections
+| Tool | Description |
+|------|-------------|
+| `list_collections` | List all collections |
+| `create_collection` | Create a new collection |
+| `move_to_collection` | Move an object into a collection |
+
+### 3D Cursor
+| Tool | Description |
+|------|-------------|
+| `get_cursor_location` | Get the 3D cursor position |
+| `set_cursor_location` | Move the 3D cursor |
+
+### Viewport
+| Tool | Description |
+|------|-------------|
+| `set_viewport_shading` | Switch between WIREFRAME / SOLID / MATERIAL / RENDERED |
+
+### Text
+| Tool | Description |
+|------|-------------|
+| `add_text_object` | Add a 3D text object with optional extrusion |
+
+### Import / Export
+| Tool | Description |
+|------|-------------|
+| `import_file` | Import .obj, .fbx, .glb/.gltf, .stl, .ply, .abc, .usd, .x3d |
+| `export_file` | Export to .obj, .fbx, .glb/.gltf, .stl, .ply, .abc, .usd, .x3d |
+
+### Scripting
+| Tool | Description |
+|------|-------------|
 | `execute_python` | Run arbitrary Python in Blender's environment |
 
 ---
