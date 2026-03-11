@@ -2,7 +2,7 @@
 
 A **Model Context Protocol (MCP) server** that runs inside Blender, letting any MCP-compatible LLM frontend control Blender through natural language.
 
-Works with **Claude Desktop, Cursor, Continue.dev, LM Studio, Open WebUI, AnythingLLM**, and anything else that speaks MCP — no API keys or cloud services required.
+Works with **Claude Desktop, Cursor, Continue.dev, LM Studio, Open WebUI**, and anything else that speaks MCP — no API keys or cloud services required.
 
 ---
 
