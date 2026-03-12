@@ -10,10 +10,14 @@ bl_info = {
 
 import bpy
 import sys
+import os
 import time
 import threading
 import subprocess
 from pathlib import Path
+
+# Ensure terminal output is not buffered when Blender is launched from a terminal
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
 
 PORT = 8400
 
@@ -38,7 +42,7 @@ def _pip_install(*packages: str) -> None:
 def _ensure_dependencies() -> bool:
     """Return True if all required packages are available (installing if needed)."""
     missing = []
-    for pkg in ("fastmcp", "uvicorn"):
+    for pkg in ("mcp", "uvicorn"):
         try:
             __import__(pkg)
         except ImportError:
@@ -49,7 +53,7 @@ def _ensure_dependencies() -> bool:
 
     print(f"[BlenderMCP] Installing: {missing}")
     try:
-        _pip_install("fastmcp", "uvicorn[standard]")
+        _pip_install("mcp[cli]", "uvicorn[standard]")
         print("[BlenderMCP] Dependencies installed.")
         return True
     except Exception as exc:
@@ -60,7 +64,7 @@ def _ensure_dependencies() -> bool:
 # ── Server management ──────────────────────────────────────────────────────
 
 def _get_server_app():
-    """Import the bundled server module and return its ASGI app."""
+    """Import the bundled server module, pre-warm schema cache, and return the ASGI app."""
     addon_dir = str(Path(__file__).parent)
     if addon_dir not in sys.path:
         sys.path.insert(0, addon_dir)
@@ -68,7 +72,27 @@ def _get_server_app():
     import importlib
     import server as _srv
     importlib.reload(_srv)
-    return _srv.get_app()
+    app = _srv.get_app()
+
+    # Pre-warm Pydantic schema generation for all tools synchronously.
+    # Without this, the first tools/list call from the client takes 15+ seconds
+    # (cold Pydantic schema generation for 54 tools), which exceeds LM Studio's
+    # timeout and causes it to cancel the request and retry forever.
+    print("[BlenderMCP] Pre-warming tool schema cache...", flush=True)
+    try:
+        import asyncio
+        import time as _time
+        t0 = _time.perf_counter()
+        # Call the exact async path FastMCP uses for a real tools/list request.
+        # This forces Pydantic to build and cache every schema up front so the
+        # first client request returns in milliseconds, not 15+ seconds.
+        tools = asyncio.run(_srv.mcp.list_tools())
+        elapsed = _time.perf_counter() - t0
+        print(f"[BlenderMCP] Schema cache ready — {len(tools)} tools in {elapsed:.2f}s", flush=True)
+    except Exception as exc:
+        print(f"[BlenderMCP] Schema pre-warm failed (non-fatal): {exc}", flush=True)
+
+    return app
 
 
 # ── Operators ─────────────────────────────────────────────────────────────
@@ -98,7 +122,7 @@ class MCP_OT_start_server(bpy.types.Operator):
                 app,
                 host="127.0.0.1",
                 port=PORT,
-                log_level="warning",
+                log_level="info",
                 loop="asyncio",
             )
             _uvicorn_server = uvicorn.Server(config)
@@ -113,7 +137,8 @@ class MCP_OT_start_server(bpy.types.Operator):
             time.sleep(0.8)
 
             _server_running = True
-            self.report({'INFO'}, f"MCP Server running at http://127.0.0.1:{PORT}/mcp")
+            print(f"[BlenderMCP] Server running — SSE: http://127.0.0.1:{PORT}/sse  |  messages: http://127.0.0.1:{PORT}/messages/", flush=True)
+            self.report({'INFO'}, f"MCP Server running at http://127.0.0.1:{PORT}/sse")
             return {'FINISHED'}
 
         except Exception as exc:
@@ -169,7 +194,7 @@ class MCP_PT_panel(bpy.types.Panel):
         box = layout.box()
         col = box.column(align=True)
         col.label(text="MCP Endpoint:", icon='LINKED')
-        col.label(text=f"http://127.0.0.1:{PORT}/mcp")
+        col.label(text=f"http://127.0.0.1:{PORT}/sse")
 
         layout.separator()
         layout.label(text="Compatible clients:")

@@ -8,14 +8,260 @@ so they are safe to call from uvicorn's worker threads.
 import bpy
 import sys
 import os
+import json
 import tempfile
 import threading
 import functools
 from typing import List, Dict, Any, Tuple
 
-from fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    from fastmcp import FastMCP
 
 mcp = FastMCP("blender-universal")
+
+_LOG_PREFIX = "[BlenderMCP]"
+_MAX_LOG_LEN = 400  # truncate long payloads in terminal output
+
+
+def _log(msg: str) -> None:
+    import time as _time
+    ts = _time.strftime("%H:%M:%S")
+    print(f"{_LOG_PREFIX} {ts} {msg}", flush=True)
+
+
+def _parse_sse(raw: bytes) -> list:
+    """Extract JSON objects from an SSE-formatted byte string (data: ... lines)."""
+    results = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            payload = line[5:].strip()
+            if payload == "[DONE]":
+                continue
+            try:
+                results.append(json.loads(payload))
+            except json.JSONDecodeError:
+                pass
+    return results
+
+
+def _fmt_json(obj, max_len: int = _MAX_LOG_LEN) -> str:
+    s = json.dumps(obj)
+    return s if len(s) <= max_len else s[:max_len] + " …"
+
+
+def _log_rpc(direction: str, data: dict) -> None:
+    """Log a single parsed JSON-RPC object."""
+    if direction == ">>":
+        method = data.get("method", "?")
+        params = data.get("params") or {}
+        req_id = data.get("id", "–")
+        if method == "tools/call":
+            tool_name = params.get("name", "?")
+            args = params.get("arguments", {})
+            _log(f"MCP >> [{req_id}] tools/call  tool={tool_name}  args={_fmt_json(args)}")
+        elif method == "tools/list":
+            _log(f"MCP >> [{req_id}] tools/list")
+        elif method == "initialize":
+            client = (params.get("clientInfo") or {})
+            _log(f"MCP >> [{req_id}] initialize  client={client.get('name','?')} {client.get('version','')}")
+        elif method and method.startswith("notifications/"):
+            reason = params.get("reason", "")
+            cancelled_id = params.get("requestId", "")
+            _log(f"MCP >> NOTIFY  {method}  requestId={cancelled_id}  reason={reason}")
+        else:
+            _log(f"MCP >> [{req_id}] {method}  {_fmt_json(params)}")
+    else:
+        req_id = data.get("id", "–")
+        if "error" in data:
+            _log(f"MCP << [{req_id}] ERROR  {_fmt_json(data['error'])}")
+        elif "result" in data:
+            result = data["result"]
+            # Summarise tools/list specially to avoid flooding
+            if isinstance(result, dict) and "tools" in result:
+                names = [t.get("name", "?") for t in result["tools"]]
+                _log(f"MCP << [{req_id}] tools/list  ({len(names)} tools): {', '.join(names)}")
+            else:
+                _log(f"MCP << [{req_id}] result  {_fmt_json(result)}")
+        else:
+            _log(f"MCP << [{req_id}] {_fmt_json(data)}")
+
+
+def _log_body(direction: str, raw: bytes) -> None:
+    """Parse and pretty-print an MCP request/response body (JSON or SSE)."""
+    if not raw or not raw.strip():
+        return
+
+    # Try plain JSON first
+    try:
+        data = json.loads(raw)
+        _log_rpc(direction, data)
+        return
+    except json.JSONDecodeError:
+        pass
+
+    # Try SSE (event: message / data: {...} format)
+    sse_objects = _parse_sse(raw)
+    if sse_objects:
+        for obj in sse_objects:
+            _log_rpc(direction, obj)
+        return
+
+    # Fallback: show truncated raw text
+    text = raw.decode("utf-8", errors="replace").strip()
+    _log(f"MCP {direction} (unparsed): {text[:_MAX_LOG_LEN]}")
+
+
+class _StripOutputSchemaMiddleware:
+    """
+    ASGI middleware that removes 'outputSchema' from tools/list SSE responses.
+
+    MCP spec 2025-06-18 added outputSchema, but many clients (LM Studio, etc.)
+    don't implement it and immediately cancel the session when they see it.
+    Stripping it makes the tools/list response look like 2024-11-05 format,
+    which every client understands.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def _send(msg):
+            if msg.get("type") == "http.response.body":
+                msg = dict(msg)
+                msg["body"] = self._strip(msg.get("body", b""))
+            await send(msg)
+
+        await self.app(scope, receive, _send)
+
+    @staticmethod
+    def _strip(chunk: bytes) -> bytes:
+        """Remove outputSchema from every SSE data frame in a chunk."""
+        if b"outputSchema" not in chunk:
+            return chunk
+        lines = []
+        for line in chunk.decode("utf-8", errors="replace").splitlines(keepends=True):
+            stripped = line.strip()
+            if stripped.startswith("data:"):
+                payload = stripped[5:].strip()
+                try:
+                    data = json.loads(payload)
+                    result = (data.get("result") or {})
+                    tools = result.get("tools")
+                    if isinstance(tools, list):
+                        for tool in tools:
+                            tool.pop("outputSchema", None)
+                        line = f"data: {json.dumps(data)}\n"
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+            lines.append(line)
+        return "".join(lines).encode("utf-8")
+
+
+class _SSEToJSONMiddleware:
+    """
+    ASGI middleware that converts single-message SSE responses to plain JSON.
+
+    FastMCP always returns responses as SSE (event: message / data: {...}) even
+    for simple request/response pairs.  Many MCP clients (LM Studio, etc.) send
+    the POST and expect a plain application/json body back — they can't parse the
+    SSE envelope, abort the connection, and never progress to tools/call.
+
+    If the response contains exactly one SSE data frame we unwrap it to JSON.
+    Multi-frame SSE streams are passed through unchanged.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start_msg: dict = {}
+        body_chunks: list[bytes] = []
+
+        async def _send(msg):
+            if msg["type"] == "http.response.start":
+                # Hold the start message until we know the full body
+                start_msg.update(msg)
+            elif msg["type"] == "http.response.body":
+                body_chunks.append(msg.get("body", b""))
+                if not msg.get("more_body", False):
+                    await self._flush(start_msg, body_chunks, send)
+
+        await self.app(scope, receive, _send)
+
+    @staticmethod
+    async def _flush(start_msg: dict, body_chunks: list[bytes], send) -> None:
+        full_body = b"".join(body_chunks)
+        sse_objects = _parse_sse(full_body)
+
+        if len(sse_objects) == 1:
+            # Single SSE frame → unwrap to plain JSON
+            json_body = json.dumps(sse_objects[0]).encode("utf-8")
+            headers = [
+                (k, v) for k, v in start_msg.get("headers", [])
+                if k.lower() not in (b"content-type", b"content-length", b"transfer-encoding")
+            ]
+            headers.extend([
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(json_body)).encode()),
+            ])
+            await send({"type": "http.response.start", "status": start_msg["status"], "headers": headers})
+            await send({"type": "http.response.body", "body": json_body, "more_body": False})
+        else:
+            # Multi-frame or non-SSE → pass through unchanged
+            await send(start_msg)
+            await send({"type": "http.response.body", "body": full_body, "more_body": False})
+
+
+class _MCPDebugMiddleware:
+    """
+    ASGI middleware that logs MCP JSON-RPC request/response bodies in real time.
+
+    Requests are logged when fully received.
+    Responses are logged per-chunk so SSE events show their actual send timestamp,
+    not the timestamp when the connection eventually closes.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # ── buffer request body (requests arrive in one shot) ────────────
+        req_chunks: list[bytes] = []
+
+        async def _receive():
+            msg = await receive()
+            if msg.get("type") == "http.request":
+                req_chunks.append(msg.get("body", b""))
+                if not msg.get("more_body", False):
+                    _log_body(">>", b"".join(req_chunks))
+            return msg
+
+        # ── log each response chunk immediately ──────────────────────────
+        # For SSE connections each chunk is one event; logging per-chunk
+        # gives accurate timestamps for when data actually leaves the server.
+        async def _send(msg):
+            if msg.get("type") == "http.response.body":
+                chunk = msg.get("body", b"")
+                if chunk and chunk.strip():
+                    _log_body("<<", chunk)
+            await send(msg)
+
+        await self.app(scope, _receive, _send)
 
 
 # ── Thread safety ──────────────────────────────────────────────────────────
@@ -24,8 +270,19 @@ def thread_safe(func):
     """Run a function on Blender's main thread and return its result."""
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        arg_summary = ", ".join(
+            [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
+        )
+        _log(f"TOOL >> {func.__name__}({arg_summary})")
+
         if threading.current_thread() is threading.main_thread():
-            return func(*args, **kwargs)
+            try:
+                result = func(*args, **kwargs)
+                _log(f"TOOL << {func.__name__} OK: {result!r}")
+                return result
+            except Exception as exc:
+                _log(f"TOOL << {func.__name__} ERROR: {exc}")
+                raise
 
         result = [None]
         error = [None]
@@ -42,18 +299,28 @@ def thread_safe(func):
         bpy.app.timers.register(_run, first_interval=0.0)
 
         if not done.wait(timeout=10.0):
+            _log(f"TOOL << {func.__name__} TIMEOUT")
             raise TimeoutError(f"Blender main thread timeout in {func.__name__}")
 
         if error[0] is not None:
+            _log(f"TOOL << {func.__name__} ERROR: {error[0]}")
             raise error[0]
 
+        _log(f"TOOL << {func.__name__} OK: {result[0]!r}")
         return result[0]
     return wrapper
 
 
 def get_app():
-    """Return the FastMCP ASGI application."""
-    return mcp.http_app(stateless_http=True)
+    """
+    Return the FastMCP ASGI application with compatibility fixes and debug logging.
+
+    Stack (outermost → innermost):
+      _MCPDebugMiddleware          – real-time request/response logging
+      _StripOutputSchemaMiddleware – removes outputSchema from tools/list
+      mcp.sse_app()                – SSE transport (GET /sse + POST /messages/)
+    """
+    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(mcp.sse_app()))
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────
