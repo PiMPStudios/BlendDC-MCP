@@ -274,9 +274,19 @@ def get_app():
     Stack (outermost → innermost):
       _MCPDebugMiddleware          – real-time request/response logging
       _StripOutputSchemaMiddleware – removes outputSchema from tools/list
-      mcp.http_app()               – Streamable HTTP transport (POST /mcp)
+      mcp.streamable_http_app()    – Streamable HTTP transport (POST /mcp)
+
+    Falls back through http_app(stateless_http=True) → sse_app() for older
+    mcp package versions.
     """
-    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(mcp.http_app(stateless_http=True)))
+    if hasattr(mcp, "streamable_http_app"):
+        transport = mcp.streamable_http_app()
+    elif hasattr(mcp, "http_app"):
+        transport = mcp.http_app(stateless_http=True)
+    else:
+        _log("WARNING: falling back to SSE transport (mcp package is outdated)")
+        transport = mcp.sse_app()
+    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(transport))
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────
