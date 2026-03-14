@@ -21,6 +21,7 @@ env/
 # Claude Code internal
 .claude/
 memory/
+.mcp.json
 
 # uv
 .uv/
