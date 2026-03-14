@@ -137,8 +137,8 @@ class MCP_OT_start_server(bpy.types.Operator):
             time.sleep(0.8)
 
             _server_running = True
-            print(f"[BlenderMCP] Server running — SSE: http://127.0.0.1:{PORT}/sse  |  messages: http://127.0.0.1:{PORT}/messages/", flush=True)
-            self.report({'INFO'}, f"MCP Server running at http://127.0.0.1:{PORT}/sse")
+            print(f"[BlenderMCP] Server running — http://127.0.0.1:{PORT}/mcp", flush=True)
+            self.report({'INFO'}, f"MCP Server running at http://127.0.0.1:{PORT}/mcp")
             return {'FINISHED'}
 
         except Exception as exc:
@@ -194,7 +194,7 @@ class MCP_PT_panel(bpy.types.Panel):
         box = layout.box()
         col = box.column(align=True)
         col.label(text="MCP Endpoint:", icon='LINKED')
-        col.label(text=f"http://127.0.0.1:{PORT}/sse")
+        col.label(text=f"http://127.0.0.1:{PORT}/mcp")
 
         layout.separator()
         layout.label(text="Compatible clients:")

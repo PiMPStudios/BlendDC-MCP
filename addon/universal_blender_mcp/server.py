@@ -116,12 +116,14 @@ def _log_body(direction: str, raw: bytes) -> None:
 
 class _StripOutputSchemaMiddleware:
     """
-    ASGI middleware that removes 'outputSchema' from tools/list SSE responses.
+    ASGI middleware that removes 'outputSchema' from tools/list responses.
 
     MCP spec 2025-06-18 added outputSchema, but many clients (LM Studio, etc.)
     don't implement it and immediately cancel the session when they see it.
     Stripping it makes the tools/list response look like 2024-11-05 format,
     which every client understands.
+
+    Handles both plain JSON (Streamable HTTP) and SSE-framed responses.
     """
 
     def __init__(self, app):
@@ -142,9 +144,22 @@ class _StripOutputSchemaMiddleware:
 
     @staticmethod
     def _strip(chunk: bytes) -> bytes:
-        """Remove outputSchema from every SSE data frame in a chunk."""
+        """Remove outputSchema from a tools/list response (plain JSON or SSE)."""
         if b"outputSchema" not in chunk:
             return chunk
+
+        # Try plain JSON first (Streamable HTTP)
+        try:
+            data = json.loads(chunk)
+            tools = (data.get("result") or {}).get("tools")
+            if isinstance(tools, list):
+                for tool in tools:
+                    tool.pop("outputSchema", None)
+            return json.dumps(data).encode("utf-8")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+        # Fall back to SSE line-by-line parsing
         lines = []
         for line in chunk.decode("utf-8", errors="replace").splitlines(keepends=True):
             stripped = line.strip()
@@ -162,65 +177,6 @@ class _StripOutputSchemaMiddleware:
                     pass
             lines.append(line)
         return "".join(lines).encode("utf-8")
-
-
-class _SSEToJSONMiddleware:
-    """
-    ASGI middleware that converts single-message SSE responses to plain JSON.
-
-    FastMCP always returns responses as SSE (event: message / data: {...}) even
-    for simple request/response pairs.  Many MCP clients (LM Studio, etc.) send
-    the POST and expect a plain application/json body back — they can't parse the
-    SSE envelope, abort the connection, and never progress to tools/call.
-
-    If the response contains exactly one SSE data frame we unwrap it to JSON.
-    Multi-frame SSE streams are passed through unchanged.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope.get("type") != "http":
-            await self.app(scope, receive, send)
-            return
-
-        start_msg: dict = {}
-        body_chunks: list[bytes] = []
-
-        async def _send(msg):
-            if msg["type"] == "http.response.start":
-                # Hold the start message until we know the full body
-                start_msg.update(msg)
-            elif msg["type"] == "http.response.body":
-                body_chunks.append(msg.get("body", b""))
-                if not msg.get("more_body", False):
-                    await self._flush(start_msg, body_chunks, send)
-
-        await self.app(scope, receive, _send)
-
-    @staticmethod
-    async def _flush(start_msg: dict, body_chunks: list[bytes], send) -> None:
-        full_body = b"".join(body_chunks)
-        sse_objects = _parse_sse(full_body)
-
-        if len(sse_objects) == 1:
-            # Single SSE frame → unwrap to plain JSON
-            json_body = json.dumps(sse_objects[0]).encode("utf-8")
-            headers = [
-                (k, v) for k, v in start_msg.get("headers", [])
-                if k.lower() not in (b"content-type", b"content-length", b"transfer-encoding")
-            ]
-            headers.extend([
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(json_body)).encode()),
-            ])
-            await send({"type": "http.response.start", "status": start_msg["status"], "headers": headers})
-            await send({"type": "http.response.body", "body": json_body, "more_body": False})
-        else:
-            # Multi-frame or non-SSE → pass through unchanged
-            await send(start_msg)
-            await send({"type": "http.response.body", "body": full_body, "more_body": False})
 
 
 class _MCPDebugMiddleware:
@@ -252,8 +208,8 @@ class _MCPDebugMiddleware:
             return msg
 
         # ── log each response chunk immediately ──────────────────────────
-        # For SSE connections each chunk is one event; logging per-chunk
-        # gives accurate timestamps for when data actually leaves the server.
+        # Logging per-chunk gives accurate timestamps for when data actually
+        # leaves the server.
         async def _send(msg):
             if msg.get("type") == "http.response.body":
                 chunk = msg.get("body", b"")
@@ -318,9 +274,9 @@ def get_app():
     Stack (outermost → innermost):
       _MCPDebugMiddleware          – real-time request/response logging
       _StripOutputSchemaMiddleware – removes outputSchema from tools/list
-      mcp.sse_app()                – SSE transport (GET /sse + POST /messages/)
+      mcp.http_app()               – Streamable HTTP transport (POST /mcp)
     """
-    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(mcp.sse_app()))
+    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(mcp.http_app(stateless_http=True)))
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────
