@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Universal Blender MCP",
     "author": "Da Hoodie Guy",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (4, 0, 0),
     "location": "View3D > N-Panel > MCP",
     "description": "MCP server for Blender — works with Claude, Cursor, Continue, LM Studio, Open WebUI",
