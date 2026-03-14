@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Universal Blender MCP",
     "author": "Da Hoodie Guy",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (4, 0, 0),
     "location": "View3D > N-Panel > MCP",
     "description": "MCP server for Blender — works with Claude, Cursor, Continue, LM Studio, Open WebUI",
@@ -70,6 +70,12 @@ def _get_server_app():
         sys.path.insert(0, addon_dir)
 
     import importlib
+
+    # Reload helper modules first so server.py picks up fresh code
+    for _mod_name in ("discovery", "rag_store"):
+        if _mod_name in sys.modules:
+            importlib.reload(sys.modules[_mod_name])
+
     import server as _srv
     importlib.reload(_srv)
     app = _srv.get_app()

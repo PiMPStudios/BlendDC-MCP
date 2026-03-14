@@ -8,9 +8,14 @@ so they are safe to call from uvicorn's worker threads.
 import bpy
 import sys
 import os
+import ast as _ast
+import collections as _collections
+import io as _io
+import contextlib as _contextlib
 import json
 import tempfile
 import threading
+import time as _time
 import functools
 from typing import List, Dict, Any, Tuple
 
@@ -1199,3 +1204,195 @@ def export_file(filepath: str, selected_only: bool = False) -> str:
         raise ValueError(f"Unsupported format '{ext}'. Supported: {list(exporters)}")
     exporters[ext]()
     return f"Exported to '{filepath}'"
+
+
+# ── Dynamic discovery ──────────────────────────────────────────────────────
+
+@mcp.tool()
+@thread_safe
+def discover_api(
+    query: str,
+    category: str = "",
+    max_results: int = 10,
+    rebuild_cache: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Search Blender's live API for operators, types, and data members.
+
+    Returns matching entries with names, docstrings, and call signatures.
+    Use this to find the right bpy.ops / bpy.types / bpy.data entry before
+    writing execute_safe_python code.
+
+    query:         search term (e.g. "mirror", "bevel", "material", "bpy.ops.mesh")
+    category:      filter — "ops" | "types" | "data" | sub-module like "mesh"
+    max_results:   number of results to return (default 10, max 50)
+    rebuild_cache: set True to force a full index rebuild (takes ~3-5 s)
+    """
+    import discovery
+    if rebuild_cache:
+        discovery.build_index(force=True)
+    return discovery.search(
+        query=query,
+        category=category,
+        max_results=min(max_results, 50),
+    )
+
+
+# ── RAG doc search ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+@thread_safe
+def query_api_docs(
+    query: str,
+    max_results: int = 3,
+) -> List[Dict[str, Any]]:
+    """
+    Search Blender's embedded API documentation using TF-IDF.
+
+    Returns the top matching API entries with docstrings and usage examples.
+    Chain with discover_api: discover the API → query docs for parameter
+    details → call execute_safe_python.
+
+    The index is built from live bpy docstrings on first call (cached to disk
+    for subsequent calls).
+
+    query:       natural language or code term (e.g. "how to add a bevel")
+    max_results: number of doc chunks to return (default 3, max 10)
+    """
+    import rag_store
+    store = rag_store.get_store()
+    return store.query(query, top_k=min(max_results, 10))
+
+
+# ── Safe Python execution ──────────────────────────────────────────────────
+
+# Rate-limiting state: track timestamps of recent execute_safe_python calls
+_exec_call_times: _collections.deque = _collections.deque(maxlen=20)
+_RATE_WINDOW = 60.0   # seconds
+_RATE_MAX    = 10     # max calls per window
+
+# Patterns that trigger a warning (not a hard block — agents are trusted, but informed)
+_DANGEROUS_CALLS = frozenset({
+    "os.system", "os.popen", "os.exec",
+    "subprocess", "shutil.rmtree", "shutil.rmdir",
+})
+
+
+def _ast_warnings(code: str) -> List[str]:
+    """Return a list of safety warnings found via static AST analysis."""
+    warnings: List[str] = []
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError as exc:
+        return [f"SyntaxError: {exc}"]
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Call):
+            if isinstance(node.func, _ast.Attribute):
+                parent = getattr(node.func.value, "id", "")
+                full   = f"{parent}.{node.func.attr}"
+                for pat in _DANGEROUS_CALLS:
+                    if pat in full:
+                        warnings.append(f"Potentially dangerous call: {full}")
+            elif isinstance(node.func, _ast.Name):
+                if node.func.id in {"eval", "compile", "__import__"}:
+                    warnings.append(f"Restricted built-in: {node.func.id}()")
+    return warnings
+
+
+def _sanitize_result(value: Any) -> Any:
+    """Recursively convert non-JSON-serializable values (bpy objects, etc.) to strings."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _sanitize_result(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_result(v) for v in value]
+    return repr(value)
+
+
+@mcp.tool()
+@thread_safe
+def execute_safe_python(
+    code: str,
+    dry_run: bool = False,
+    push_undo: bool = True,
+) -> Dict[str, Any]:
+    """
+    Execute Python code in Blender's environment with undo support and safety checks.
+
+    Enhancements over execute_python:
+    • Pushes an undo step first so all changes are reversible via Ctrl-Z
+    • Validates syntax and flags dangerous patterns before running
+    • Captures both stdout and a 'result' variable from your code
+    • Sanitizes output so no raw bpy objects leak into the response
+    • dry_run=True returns a syntax + safety analysis without executing
+    • Rate-limited to 10 calls per 60 seconds
+
+    code:       Python source to execute (has access to bpy, sys, os, json)
+    dry_run:    if True, validate only — do not execute
+    push_undo:  push an undo step before executing (default True)
+
+    Returns {result, stdout, warnings, elapsed_s} on success,
+            {error, warnings, stdout} on failure,
+         or {dry_run, syntax, warnings, code} when dry_run=True.
+    """
+    # ── Rate limit ────────────────────────────────────────────────────────
+    now = _time.monotonic()
+    while _exec_call_times and now - _exec_call_times[0] > _RATE_WINDOW:
+        _exec_call_times.popleft()
+    if len(_exec_call_times) >= _RATE_MAX:
+        return {
+            "error": f"Rate limit: max {_RATE_MAX} calls per {int(_RATE_WINDOW)} s — wait before retrying"
+        }
+    _exec_call_times.append(now)
+
+    # ── Syntax check + static analysis ───────────────────────────────────
+    try:
+        _ast.parse(code)
+    except SyntaxError as exc:
+        return {"error": f"SyntaxError: {exc}", "warnings": []}
+
+    warnings = _ast_warnings(code)
+
+    if dry_run:
+        return {
+            "dry_run":  True,
+            "syntax":   "OK",
+            "warnings": warnings,
+            "code":     code,
+        }
+
+    # ── Undo push ─────────────────────────────────────────────────────────
+    if push_undo:
+        try:
+            bpy.ops.ed.undo_push(message="execute_safe_python")
+        except Exception:
+            pass  # Some contexts (render, modal ops) don't support undo
+
+    # ── Execute ───────────────────────────────────────────────────────────
+    namespace: Dict[str, Any] = {
+        "bpy":    bpy,
+        "sys":    sys,
+        "os":     os,
+        "json":   json,
+        "result": None,
+    }
+    buf = _io.StringIO()
+    t0  = _time.perf_counter()
+    try:
+        with _contextlib.redirect_stdout(buf):
+            exec(code, namespace)  # noqa: S102
+    except Exception as exc:
+        return {
+            "error":     f"{type(exc).__name__}: {exc}",
+            "warnings":  warnings,
+            "stdout":    buf.getvalue(),
+            "elapsed_s": round(_time.perf_counter() - t0, 3),
+        }
+
+    return {
+        "result":    _sanitize_result(namespace.get("result")),
+        "stdout":    buf.getvalue(),
+        "warnings":  warnings,
+        "elapsed_s": round(_time.perf_counter() - t0, 3),
+    }

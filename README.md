@@ -252,6 +252,56 @@ curl -X POST http://127.0.0.1:8400/mcp \
 
 ---
 
+## Advanced Features (v1.3+)
+
+Three layered capabilities that let the agent reach Blender's full API surface — not just the 54 static tools — using a `discover → docs → execute` chain.
+
+### `discover_api` — Live API Discovery
+
+Searches the full `bpy.ops.*`, `bpy.types.*`, and `bpy.data.*` namespace using keyword and fuzzy matching. The index is built once on first call (≈ 3 s) and cached to disk; subsequent calls are instant.
+
+```
+discover_api("bevel")
+→ bpy.ops.mesh.bevel(), bpy.types.BevelModifier, …
+
+discover_api("mirror", category="ops")
+→ bpy.ops.mesh.symmetrize(), bpy.ops.object.modifier_add type=MIRROR, …
+```
+
+### `query_api_docs` — TF-IDF Doc Search
+
+Builds a TF-IDF index over every `bpy.ops` and `bpy.types` docstring at first use (cached to disk). Returns the top-N most relevant entries with summaries and usage examples — zero network requests, no extra dependencies.
+
+```
+query_api_docs("how to apply a subdivision surface modifier")
+→ bpy.types.SubsurfModifier — subdivision surface modifier …
+  bpy.ops.object.modifier_apply — Apply active modifier on the active object …
+```
+
+### `execute_safe_python` — Safe Code Execution
+
+An enhanced version of `execute_python` with:
+- **Undo push** before execution — all changes are reversible with Ctrl-Z
+- **Dry-run mode** (`dry_run=True`) — validates syntax and flags dangerous patterns without executing
+- **Result capture** — name a variable `result` in your code and it's returned in the response
+- **Output sanitization** — no raw `bpy` objects in the response; everything is JSON-safe
+- **Rate limiting** — capped at 10 calls per 60 seconds
+
+```python
+# Agent can chain all three:
+discover_api("subdivision surface")          # find the right operator/type
+query_api_docs("subdivide mesh evenly")      # understand the parameters
+execute_safe_python("""
+import bpy
+obj = bpy.context.active_object
+mod = obj.modifiers.new("Subdiv", "SUBSURF")
+mod.levels = 3
+result = f"Added subdivision modifier at level {mod.levels}"
+""", push_undo=True)
+```
+
+---
+
 ## Project Structure
 
 ```
@@ -259,7 +309,9 @@ universal-blender-mcp/
 ├── addon/
 │   └── universal_blender_mcp/   ← installable Blender addon
 │       ├── __init__.py           ← bl_info, UI panel, server management
-│       └── server.py             ← FastMCP tools (all Blender API calls)
+│       ├── server.py             ← FastMCP tools (54 static + 3 advanced)
+│       ├── discovery.py          ← bpy API indexer + keyword/fuzzy search
+│       └── rag_store.py          ← TF-IDF doc store over bpy docstrings
 ├── build_addon.py               ← builds the installable .zip
 ├── pyproject.toml
 └── LICENSE
@@ -271,7 +323,7 @@ universal-blender-mcp/
 
 ```bash
 python3 build_addon.py
-# → dist/universal_blender_mcp_v1.1.0.zip
+# → dist/universal_blender_mcp_v1.3.0.zip
 ```
 
 ---
