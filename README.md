@@ -73,6 +73,27 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+### Claude Code
+
+Add to `~/.claude/mcp.json` (global) or `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "blender": {
+      "type": "http",
+      "url": "http://127.0.0.1:8400/mcp"
+    }
+  }
+}
+```
+
+Or add it directly from the terminal:
+
+```bash
+claude mcp add --transport http blender http://127.0.0.1:8400/mcp
+```
+
 ### Cursor
 
 Add to `.cursor/mcp.json` (or Cursor's MCP settings):
@@ -113,27 +134,6 @@ Add to `mcp.json`:
     }
   ]
 }
-```
-
-### Claude Code
-
-Add to `~/.claude/mcp.json` (global) or `.mcp.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "type": "http",
-      "url": "http://127.0.0.1:8400/mcp"
-    }
-  }
-}
-```
-
-Or add it directly from the terminal:
-
-```bash
-claude mcp add --transport http blender http://127.0.0.1:8400/mcp
 ```
 
 ### Quick test (curl)
