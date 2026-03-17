@@ -155,7 +155,7 @@ curl -X POST http://127.0.0.1:8400/mcp \
 
 ---
 
-## Available Tools (54)
+## Available Tools (59)
 
 ### Objects
 | Tool | Description |
@@ -265,6 +265,23 @@ curl -X POST http://127.0.0.1:8400/mcp \
 |------|-------------|
 | `import_file` | Import .obj, .fbx, .glb/.gltf, .stl, .ply, .abc, .usd, .x3d |
 | `export_file` | Export to .obj, .fbx, .glb/.gltf, .stl, .ply, .abc, .usd, .x3d |
+| `batch_export` | Export every mesh in a collection as a separate FBX or GLB file |
+
+### UV & Texturing
+| Tool | Description |
+|------|-------------|
+| `unwrap_uv` | UV unwrap a mesh (smart_project / unwrap / cube_project) |
+| `set_material_texture` | Load an image and wire it into a material channel (Base Color, Normal, Roughness, Metallic, Emission) |
+
+### Baking
+| Tool | Description |
+|------|-------------|
+| `bake_texture` | Bake NORMAL / AO / DIFFUSE / ROUGHNESS from a high-poly onto a low-poly object via Cycles |
+
+### Mesh Editing
+| Tool | Description |
+|------|-------------|
+| `edit_mesh` | Loop cut, inset, extrude, merge by distance, or set smooth/flat shading |
 
 ### Scripting
 | Tool | Description |
@@ -275,7 +292,7 @@ curl -X POST http://127.0.0.1:8400/mcp \
 
 ## Advanced Features (v1.3+)
 
-Three layered capabilities that let the agent reach Blender's full API surface — not just the 54 static tools — using a `discover → docs → execute` chain.
+Three layered capabilities that let the agent reach Blender's full API surface — not just the 59 static tools — using a `discover → docs → execute` chain.
 
 ### `discover_api` — Live API Discovery
 
@@ -330,7 +347,7 @@ universal-blender-mcp/
 ├── addon/
 │   └── universal_blender_mcp/   ← installable Blender addon
 │       ├── __init__.py           ← bl_info, UI panel, server management
-│       ├── server.py             ← FastMCP tools (54 static + 3 advanced)
+│       ├── server.py             ← FastMCP tools (59 static + 3 advanced)
 │       ├── discovery.py          ← bpy API indexer + keyword/fuzzy search
 │       └── rag_store.py          ← TF-IDF doc store over bpy docstrings
 ├── build_addon.py               ← builds the installable .zip

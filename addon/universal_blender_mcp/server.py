@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time as _time
 import functools
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -1396,3 +1396,470 @@ def execute_safe_python(
         "warnings":  warnings,
         "elapsed_s": round(_time.perf_counter() - t0, 3),
     }
+
+
+# ── UV / Texture / Export / Bake / Mesh-edit ──────────────────────────────
+
+
+@mcp.tool()
+@thread_safe
+def unwrap_uv(
+    object_name: str,
+    method: str = "smart_project",
+    angle_limit: float = 66.0,
+    island_margin: float = 0.02,
+) -> Dict[str, Any]:
+    """
+    UV unwrap a mesh object and return the method used.
+
+    object_name: name of the mesh object to unwrap
+    method: smart_project (default) | unwrap | cube_project
+    angle_limit: angle limit in degrees for smart_project (default 66.0)
+    island_margin: margin between UV islands, 0.0–1.0 (default 0.02)
+
+    Enters Edit Mode, selects all geometry, runs the chosen UV operator,
+    then returns to Object Mode.  UV islands outside 0–1 space break
+    Roblox textures, so smart_project is recommended for hard-surface props.
+    """
+    import math as _math
+
+    obj = bpy.data.objects.get(object_name)
+    if not obj:
+        raise ValueError(f"Object '{object_name}' not found")
+    if obj.type != 'MESH':
+        raise ValueError(f"Object '{object_name}' is not a mesh (type: {obj.type})")
+
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+
+    method_lower = method.lower()
+    try:
+        if method_lower == "smart_project":
+            bpy.ops.uv.smart_project(
+                angle_limit=_math.radians(angle_limit),
+                island_margin=island_margin,
+            )
+        elif method_lower == "unwrap":
+            bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=island_margin)
+        elif method_lower == "cube_project":
+            bpy.ops.uv.cube_project(cube_size=1.0)
+        else:
+            raise ValueError(
+                f"Unknown method '{method}'. Choose: smart_project, unwrap, cube_project"
+            )
+    finally:
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    return {
+        "object": object_name,
+        "method": method_lower,
+        "angle_limit_deg": angle_limit,
+        "island_margin": island_margin,
+    }
+
+
+@mcp.tool()
+@thread_safe
+def set_material_texture(
+    material_name: str,
+    texture_path: str,
+    channel: str = "BASE_COLOR",
+) -> Dict[str, Any]:
+    """
+    Load an image file and wire it into an existing material's Principled BSDF.
+
+    material_name: name of an existing Blender material
+    texture_path: absolute path to the image file (PNG, JPEG, EXR, etc.)
+    channel: BASE_COLOR | NORMAL | ROUGHNESS | METALLIC | EMISSION
+
+    For NORMAL, a Normal Map node is automatically inserted between the
+    texture and the BSDF.  Color-space is set to Non-Color for data channels
+    (NORMAL, ROUGHNESS, METALLIC) and sRGB for color channels.
+    Returns the material name and wired channel.
+    """
+    mat = bpy.data.materials.get(material_name)
+    if not mat:
+        raise ValueError(f"Material '{material_name}' not found")
+    if not os.path.exists(texture_path):
+        raise ValueError(f"Texture file not found: '{texture_path}'")
+
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    bsdf = nodes.get("Principled BSDF")
+    if not bsdf:
+        raise ValueError(f"Material '{material_name}' has no Principled BSDF node")
+
+    img = bpy.data.images.load(texture_path, check_existing=True)
+
+    tex_node = nodes.new("ShaderNodeTexImage")
+    tex_node.image = img
+
+    channel_upper = channel.upper()
+    if channel_upper == "BASE_COLOR":
+        img.colorspace_settings.name = 'sRGB'
+        links.new(tex_node.outputs["Color"], bsdf.inputs["Base Color"])
+    elif channel_upper == "ROUGHNESS":
+        img.colorspace_settings.name = 'Non-Color'
+        links.new(tex_node.outputs["Color"], bsdf.inputs["Roughness"])
+    elif channel_upper == "METALLIC":
+        img.colorspace_settings.name = 'Non-Color'
+        links.new(tex_node.outputs["Color"], bsdf.inputs["Metallic"])
+    elif channel_upper == "EMISSION":
+        img.colorspace_settings.name = 'sRGB'
+        # Blender 4.x uses "Emission Color"; fall back to "Emission" for older builds
+        emission_input = bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
+        if not emission_input:
+            nodes.remove(tex_node)
+            raise ValueError("Principled BSDF has no Emission input on this Blender build")
+        links.new(tex_node.outputs["Color"], emission_input)
+    elif channel_upper == "NORMAL":
+        img.colorspace_settings.name = 'Non-Color'
+        normal_map_node = nodes.new("ShaderNodeNormalMap")
+        links.new(tex_node.outputs["Color"], normal_map_node.inputs["Color"])
+        links.new(normal_map_node.outputs["Normal"], bsdf.inputs["Normal"])
+    else:
+        nodes.remove(tex_node)
+        raise ValueError(
+            f"Unknown channel '{channel}'. "
+            "Choose: BASE_COLOR, NORMAL, ROUGHNESS, METALLIC, EMISSION"
+        )
+
+    return {
+        "material": material_name,
+        "channel": channel_upper,
+        "texture": os.path.basename(texture_path),
+    }
+
+
+@mcp.tool()
+@thread_safe
+def batch_export(
+    collection_name: str,
+    output_dir: str,
+    format: str = "FBX",
+    apply_modifiers: bool = True,
+    use_object_name: bool = True,
+) -> Dict[str, Any]:
+    """
+    Export every mesh object in a collection as a separate file.
+
+    collection_name: name of the source Blender collection
+    output_dir: directory path where files will be written (created if absent)
+    format: FBX (default) | GLB
+    apply_modifiers: apply all modifiers before export (default True)
+    use_object_name: use the object's Blender name as the output filename (default True)
+
+    Applies transforms (location/rotation/scale) on each object before export.
+    Returns a dict with the list of exported paths, a count, and any per-object errors.
+    """
+    col = bpy.data.collections.get(collection_name)
+    if not col:
+        raise ValueError(f"Collection '{collection_name}' not found")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    fmt_upper = format.upper()
+    if fmt_upper not in ("FBX", "GLB"):
+        raise ValueError(f"Unsupported format '{format}'. Choose: FBX, GLB")
+
+    ext = ".fbx" if fmt_upper == "FBX" else ".glb"
+    mesh_objects = [o for o in col.objects if o.type == 'MESH']
+    if not mesh_objects:
+        return {"exported": [], "count": 0, "errors": [], "message": "No mesh objects in collection"}
+
+    exported_paths: List[str] = []
+    errors: List[Dict[str, str]] = []
+
+    for obj in mesh_objects:
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+            safe_name = "".join(c if (c.isalnum() or c in "._- ") else "_" for c in obj.name)
+            out_path = os.path.join(output_dir, safe_name + ext)
+
+            if fmt_upper == "FBX":
+                bpy.ops.export_scene.fbx(
+                    filepath=out_path,
+                    use_selection=True,
+                    apply_unit_scale=True,
+                    apply_scale_options='FBX_SCALE_ALL',
+                    use_mesh_modifiers=apply_modifiers,
+                    mesh_smooth_type='FACE',
+                    add_leaf_bones=False,
+                    path_mode='COPY',
+                )
+            else:
+                bpy.ops.export_scene.gltf(
+                    filepath=out_path,
+                    use_selection=True,
+                    export_apply=apply_modifiers,
+                    export_format='GLB',
+                )
+
+            exported_paths.append(out_path)
+        except Exception as exc:
+            errors.append({"object": obj.name, "error": str(exc)})
+
+    return {
+        "exported": exported_paths,
+        "count": len(exported_paths),
+        "errors": errors,
+        "output_dir": output_dir,
+    }
+
+
+@mcp.tool()
+@thread_safe
+def bake_texture(
+    high_poly: str,
+    low_poly: str,
+    bake_type: str = "NORMAL",
+    resolution: int = 1024,
+    output_path: str = "",
+    margin: int = 16,
+) -> Dict[str, Any]:
+    """
+    Bake from a high-poly object onto a low-poly object using Cycles.
+
+    high_poly: name of the high-resolution source object
+    low_poly: name of the low-resolution target object
+    bake_type: NORMAL | AO | DIFFUSE | ROUGHNESS (default NORMAL)
+    resolution: output image size in pixels, square (default 1024)
+    output_path: absolute path to save the PNG; auto-generated in temp dir if empty
+    margin: pixel margin around UV islands (default 16)
+
+    Temporarily switches the render engine to CYCLES for the bake, restores
+    it afterward.  Creates a new image datablock, adds an unconnected
+    ShaderNodeTexImage to the low-poly material as the bake target, bakes,
+    and saves as PNG.
+    Returns the output path and bake parameters.
+    """
+    hp_obj = bpy.data.objects.get(high_poly)
+    if not hp_obj:
+        raise ValueError(f"High-poly object '{high_poly}' not found")
+    lp_obj = bpy.data.objects.get(low_poly)
+    if not lp_obj:
+        raise ValueError(f"Low-poly object '{low_poly}' not found")
+
+    bake_type_upper = bake_type.upper()
+    valid_types = ("NORMAL", "AO", "DIFFUSE", "ROUGHNESS")
+    if bake_type_upper not in valid_types:
+        raise ValueError(f"Unknown bake_type '{bake_type}'. Choose: {', '.join(valid_types)}")
+
+    prev_engine = bpy.context.scene.render.engine
+    bpy.context.scene.render.engine = 'CYCLES'
+
+    try:
+        img_name = f"Bake_{low_poly}_{bake_type_upper}"
+        if img_name in bpy.data.images:
+            bpy.data.images.remove(bpy.data.images[img_name])
+        bake_img = bpy.data.images.new(img_name, width=resolution, height=resolution, alpha=False)
+
+        # Ensure low-poly has a material with nodes
+        if not lp_obj.data.materials:
+            mat = bpy.data.materials.new(name=f"{low_poly}_BakeMat")
+            mat.use_nodes = True
+            lp_obj.data.materials.append(mat)
+        else:
+            mat = lp_obj.data.materials[0]
+            mat.use_nodes = True
+
+        nodes = mat.node_tree.nodes
+        # Remove any previous bake target node
+        for n in [n for n in nodes if n.name == "__bake_target__"]:
+            nodes.remove(n)
+
+        # Add unconnected texture node as the bake target
+        tex_node = nodes.new("ShaderNodeTexImage")
+        tex_node.name = "__bake_target__"
+        tex_node.image = bake_img
+        nodes.active = tex_node
+
+        # Select high-poly, then set low-poly as active
+        bpy.ops.object.select_all(action='DESELECT')
+        hp_obj.select_set(True)
+        lp_obj.select_set(True)
+        bpy.context.view_layer.objects.active = lp_obj
+
+        bpy.context.scene.render.bake.use_selected_to_active = True
+        bpy.context.scene.render.bake.margin = margin
+
+        bpy.ops.object.bake(type=bake_type_upper)
+
+        if not output_path:
+            output_path = os.path.join(
+                tempfile.gettempdir(),
+                f"{img_name}_{resolution}px.png",
+            )
+
+        bake_img.filepath_raw = output_path
+        bake_img.file_format = 'PNG'
+        bake_img.save()
+
+        return {
+            "output_path": output_path,
+            "bake_type": bake_type_upper,
+            "resolution": resolution,
+            "high_poly": high_poly,
+            "low_poly": low_poly,
+            "image_name": img_name,
+        }
+    finally:
+        bpy.context.scene.render.engine = prev_engine
+
+
+@mcp.tool()
+@thread_safe
+def edit_mesh(
+    object_name: str,
+    operation: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Perform a basic mesh editing operation on a mesh object.
+
+    object_name: name of the target mesh object
+    operation: one of loop_cut | inset | extrude_region | merge_by_distance | set_smooth_shading
+    params: optional dict of operation-specific parameters (see below)
+
+    loop_cut params:
+      cuts (int, default 1)          — number of loop cuts to insert
+      edge_percent (float, default 0.0) — slide position along edge, -1.0 to 1.0
+
+    inset params:
+      thickness (float, default 0.1)   — inset amount
+      depth (float, default 0.0)       — depth offset
+      use_boundary (bool, default True) — inset boundary edges
+
+    extrude_region params:
+      direction (str 'X'|'Y'|'Z', default 'Z') — extrusion axis
+      amount (float, default 1.0)               — extrusion distance
+
+    merge_by_distance params:
+      threshold (float, default 0.0001) — merge distance
+
+    set_smooth_shading params:
+      smooth (bool, default True)               — True=smooth, False=flat
+      auto_smooth_angle (float, default 30.0)   — angle threshold in degrees
+
+    Returns the object name, operation, and effective params used.
+    """
+    import bmesh as _bmesh
+    import math as _math
+
+    obj = bpy.data.objects.get(object_name)
+    if not obj:
+        raise ValueError(f"Object '{object_name}' not found")
+    if obj.type != 'MESH':
+        raise ValueError(f"Object '{object_name}' is not a mesh (type: {obj.type})")
+
+    if params is None:
+        params = {}
+
+    op_lower = operation.lower()
+    valid_ops = ("loop_cut", "inset", "extrude_region", "merge_by_distance", "set_smooth_shading")
+    if op_lower not in valid_ops:
+        raise ValueError(f"Unknown operation '{operation}'. Choose: {', '.join(valid_ops)}")
+
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+    if op_lower == "set_smooth_shading":
+        smooth = bool(params.get("smooth", True))
+        auto_angle = float(params.get("auto_smooth_angle", 30.0))
+        if smooth:
+            bpy.ops.object.shade_smooth()
+        else:
+            bpy.ops.object.shade_flat()
+        # Blender 4.1+ removed use_auto_smooth; handle both APIs gracefully
+        try:
+            obj.data.use_auto_smooth = smooth
+            obj.data.auto_smooth_angle = _math.radians(auto_angle)
+        except AttributeError:
+            pass  # Blender 4.1+ uses Smooth by Angle modifier instead
+        return {
+            "object": object_name,
+            "operation": op_lower,
+            "smooth": smooth,
+            "auto_smooth_angle_deg": auto_angle,
+        }
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    try:
+        bm = _bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+
+        # Select all geometry
+        for v in bm.verts:
+            v.select = True
+        for e in bm.edges:
+            e.select = True
+        for f in bm.faces:
+            f.select = True
+        bm.select_flush_mode()
+
+        if op_lower == "loop_cut":
+            cuts = int(params.get("cuts", 1))
+            edge_percent = float(params.get("edge_percent", 0.0))
+            # Find the longest edge to determine the loop-cut axis
+            longest = max(bm.edges, key=lambda e: e.calc_length())
+            _bmesh.ops.subdivide_edges(
+                bm,
+                edges=[longest] + [e for e in bm.edges if e != longest and
+                                    any(v in longest.verts for v in e.verts)],
+                cuts=cuts,
+                use_grid_fill=True,
+            )
+            _bmesh.update_edit_mesh(obj.data)
+            effective_params = {"cuts": cuts, "edge_percent": edge_percent}
+
+        elif op_lower == "inset":
+            thickness = float(params.get("thickness", 0.1))
+            depth = float(params.get("depth", 0.0))
+            use_boundary = bool(params.get("use_boundary", True))
+            _bmesh.ops.inset_region(
+                bm,
+                faces=bm.faces,
+                thickness=thickness,
+                depth=depth,
+                use_boundary=use_boundary,
+            )
+            _bmesh.update_edit_mesh(obj.data)
+            effective_params = {"thickness": thickness, "depth": depth, "use_boundary": use_boundary}
+
+        elif op_lower == "extrude_region":
+            direction = params.get("direction", "Z").upper()
+            amount = float(params.get("amount", 1.0))
+            vec_map = {"X": (amount, 0.0, 0.0), "Y": (0.0, amount, 0.0), "Z": (0.0, 0.0, amount)}
+            if direction not in vec_map:
+                raise ValueError(f"direction must be X, Y, or Z; got '{direction}'")
+            import mathutils as _mu
+            result = _bmesh.ops.extrude_face_region(bm, geom=bm.faces[:])
+            new_verts = [e for e in result["geom"] if isinstance(e, _bmesh.types.BMVert)]
+            _bmesh.ops.translate(bm, vec=_mu.Vector(vec_map[direction]), verts=new_verts)
+            _bmesh.update_edit_mesh(obj.data)
+            effective_params = {"direction": direction, "amount": amount}
+
+        elif op_lower == "merge_by_distance":
+            threshold = float(params.get("threshold", 0.0001))
+            _bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=threshold)
+            _bmesh.update_edit_mesh(obj.data)
+            effective_params = {"threshold": threshold}
+
+    finally:
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    return {"object": object_name, "operation": op_lower, "params": effective_params}
