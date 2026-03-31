@@ -60,18 +60,24 @@ http://127.0.0.1:8400/mcp
 
 ### Claude Desktop
 
+Claude Desktop requires an `mcp-remote` bridge to connect to HTTP servers.
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "blender": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:8400/mcp"
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://127.0.0.1:8400/mcp"
+      ]
     }
   }
 }
 ```
+
+> **Note:** The `"type": "streamable-http"` syntax used by Claude Code is not supported in Claude Desktop's config format. The `mcp-remote` bridge wraps the HTTP server in a stdio process that Claude Desktop can connect to.
 
 ### Claude Code
 
