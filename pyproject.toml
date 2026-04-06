@@ -1,6 +1,6 @@
 [project]
 name = "universal-blender-mcp"
-version = "1.1.0"
+version = "1.4.1"
 description = "Universal MCP server for Blender — works with any LLM frontend"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Universal Blender MCP",
     "author": "Da Hoodie Guy",
-    "version": (1, 4, 0),
+    "version": (1, 4, 1),
     "blender": (4, 0, 0),
     "location": "View3D > N-Panel > MCP",
     "description": "MCP server for Blender — works with Claude, Cursor, Continue, LM Studio, Open WebUI",
@@ -28,19 +28,45 @@ _server_running = False
 
 # ── Dependency management ──────────────────────────────────────────────────
 
+# Packages are installed here — inside the addon folder, always writable, no admin needed.
+_LIB_DIR = str(Path(__file__).parent / "lib")
+
+
+def _ensure_lib_on_path() -> None:
+    """Add the addon's lib directory to sys.path so installed packages are importable."""
+    if _LIB_DIR not in sys.path:
+        sys.path.insert(0, _LIB_DIR)
+    # pywin32 splits itself across win32/ and win32/lib/ — .pth files aren't
+    # processed for --target installs so we add both manually.
+    for subdir in ("win32", os.path.join("win32", "lib")):
+        full = str(Path(_LIB_DIR) / subdir)
+        if os.path.isdir(full) and full not in sys.path:
+            sys.path.insert(0, full)
+    # Register the DLL directory so Windows can find pywintypes313.dll.
+    # os.add_dll_directory is Windows-only (Python 3.8+).
+    if hasattr(os, "add_dll_directory"):
+        dll_dir = str(Path(_LIB_DIR) / "pywin32_system32")
+        if os.path.isdir(dll_dir):
+            os.add_dll_directory(dll_dir)
+
+
 def _pip_install(*packages: str) -> None:
-    """Install packages into Blender's Python using pip."""
+    """Install packages into the addon's lib/ directory."""
+    os.makedirs(_LIB_DIR, exist_ok=True)
     subprocess.check_call(
         [sys.executable, "-m", "ensurepip", "--upgrade"],
         stderr=subprocess.DEVNULL,
     )
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "--quiet", "--upgrade"] + list(packages)
+        [sys.executable, "-m", "pip", "install", "--quiet",
+         "--target", _LIB_DIR] + list(packages)
     )
 
 
 def _ensure_dependencies() -> bool:
     """Return True if all required packages are available (installing if needed)."""
+    _ensure_lib_on_path()
+
     missing = []
     for pkg in ("mcp", "uvicorn"):
         try:
@@ -53,7 +79,13 @@ def _ensure_dependencies() -> bool:
 
     print(f"[BlenderMCP] Installing: {missing}")
     try:
-        _pip_install("mcp[cli]", "uvicorn[standard]")
+        # On Windows: use plain mcp (not mcp[cli]) to avoid pulling in prompt_toolkit
+        # and rich which require pywin32; use plain uvicorn to avoid uvloop (no Windows wheels).
+        if sys.platform == "win32":
+            _pip_install("mcp", "uvicorn")
+        else:
+            _pip_install("mcp[cli]", "uvicorn[standard]")
+        _ensure_lib_on_path()
         print("[BlenderMCP] Dependencies installed.")
         return True
     except Exception as exc:
