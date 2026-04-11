@@ -1,11 +1,13 @@
 bl_info = {
-    "name": "Universal Blender MCP",
-    "author": "Da Hoodie Guy",
-    "version": (2, 0, 0),
+    "name": "BlendDC-MCP - Datacenter Asset Factory for UPTIME",
+    "author": "DaRealDaHoodie",
+    "version": (3, 0, 0),
     "blender": (4, 0, 0),
-    "location": "View3D > N-Panel > MCP",
-    "description": "MCP server for Blender — works with Claude, Cursor, Continue, LM Studio, Open WebUI",
-    "category": "Development",
+    "location": "View3D > N-Panel > BlendDC-MCP",
+    "description": "Complete production pipeline for realistic datacenter racks, equipment, cabling, materials, variation, failure states, and full facility sections. Built specifically for the UE5 game UPTIME.",
+    "warning": "",
+    "doc_url": "https://github.com/DaRealDaHoodie/BlendDC-MCP",
+    "category": "Add Mesh",
 }
 
 import bpy
@@ -77,7 +79,7 @@ def _ensure_dependencies() -> bool:
     if not missing:
         return True
 
-    print(f"[BlenderMCP] Installing: {missing}")
+    print(f"[BlendDC-MCP] Installing: {missing}")
     try:
         # On Windows: use plain mcp (not mcp[cli]) to avoid pulling in prompt_toolkit
         # and rich which require pywin32; use plain uvicorn to avoid uvloop (no Windows wheels).
@@ -86,10 +88,10 @@ def _ensure_dependencies() -> bool:
         else:
             _pip_install("mcp[cli]", "uvicorn[standard]")
         _ensure_lib_on_path()
-        print("[BlenderMCP] Dependencies installed.")
+        print("[BlendDC-MCP] Dependencies installed.")
         return True
     except Exception as exc:
-        print(f"[BlenderMCP] ERROR installing dependencies: {exc}")
+        print(f"[BlendDC-MCP] ERROR installing dependencies: {exc}")
         return False
 
 
@@ -114,6 +116,13 @@ def _get_server_app():
         "mesh_tools",
         "gn_tools",
         "export_tools",
+        "equipment_tools",
+        "material_tools",
+        "bay_tools",
+        "cable_tools",
+        "variation_tools",
+        "facility_tools",
+        "polish_tools",
     ):
         if _mod_name in sys.modules:
             importlib.reload(sys.modules[_mod_name])
@@ -126,7 +135,7 @@ def _get_server_app():
     # Without this, the first tools/list call from the client takes 15+ seconds
     # (cold Pydantic schema generation for 54 tools), which exceeds LM Studio's
     # timeout and causes it to cancel the request and retry forever.
-    print("[BlenderMCP] Pre-warming tool schema cache...", flush=True)
+    print("[BlendDC-MCP] Pre-warming tool schema cache...", flush=True)
     try:
         import asyncio
         import time as _time
@@ -136,9 +145,9 @@ def _get_server_app():
         # first client request returns in milliseconds, not 15+ seconds.
         tools = asyncio.run(_srv.mcp.list_tools())
         elapsed = _time.perf_counter() - t0
-        print(f"[BlenderMCP] Schema cache ready — {len(tools)} tools in {elapsed:.2f}s", flush=True)
+        print(f"[BlendDC-MCP] Schema cache ready — {len(tools)} tools in {elapsed:.2f}s", flush=True)
     except Exception as exc:
-        print(f"[BlenderMCP] Schema pre-warm failed (non-fatal): {exc}", flush=True)
+        print(f"[BlendDC-MCP] Schema pre-warm failed (non-fatal): {exc}", flush=True)
 
     return app
 
@@ -185,7 +194,7 @@ class MCP_OT_start_server(bpy.types.Operator):
             time.sleep(0.8)
 
             _server_running = True
-            print(f"[BlenderMCP] Server running — http://127.0.0.1:{PORT}/mcp", flush=True)
+            print(f"[BlendDC-MCP] Server running — http://127.0.0.1:{PORT}/mcp", flush=True)
             self.report({'INFO'}, f"MCP Server running at http://127.0.0.1:{PORT}/mcp")
             return {'FINISHED'}
 
@@ -220,17 +229,17 @@ class MCP_OT_stop_server(bpy.types.Operator):
 # ── Panel ──────────────────────────────────────────────────────────────────
 
 class MCP_PT_panel(bpy.types.Panel):
-    bl_label = "Universal MCP"
+    bl_label = "BlendDC-MCP"
     bl_idname = "MCP_PT_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "MCP"
+    bl_category = "BlendDC"
 
     def draw(self, context):
         layout = self.layout
 
         v = bl_info["version"]
-        layout.label(text=f"Universal Blender MCP  v{v[0]}.{v[1]}.{v[2]}", icon='TOOL_SETTINGS')
+        layout.label(text=f"BlendDC-MCP  v{v[0]}.{v[1]}.{v[2]}", icon='TOOL_SETTINGS')
         layout.separator()
 
         if _server_running:

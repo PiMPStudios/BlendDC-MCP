@@ -1,384 +1,275 @@
-# Universal Blender MCP
+# BlendDC-MCP
 
-A **Model Context Protocol (MCP) server** that runs inside Blender, letting any MCP-compatible LLM frontend control Blender through natural language.
+### Datacenter Asset Factory for UPTIME
 
-Works with **Claude Desktop, Cursor, Continue.dev, LM Studio, Open WebUI**, and anything else that speaks MCP — no API keys or cloud services required.
+**198 production-ready tools for building photorealistic datacenter environments in Blender — driven by any MCP-compatible AI frontend.**
+
+BlendDC-MCP is a Blender addon that starts a lightweight MCP server inside Blender's Python process. Connect Claude, Cursor, LM Studio, or any MCP client, then describe what you want to build — racks, bays, cables, variation, failure states, full facility sections — and get production-ready UE5 assets back.
+
+Built from the ground up for **UPTIME**, an Unreal Engine 5 datacenter operations simulator where players physically configure real-scale datacenters at runtime.
+
+```
+AI Frontend  ──HTTP──▶  BlendDC-MCP Server (inside Blender)  ──bpy──▶  Blender Scene
+  (Claude,              FastMCP / uvicorn                               racks, cables,
+   Cursor, etc.)        http://127.0.0.1:8400/mcp                       materials, UE5…
+```
 
 ---
 
-## How It Works
+## What It Does
+
+BlendDC-MCP gives an AI 198 tools spanning the complete datacenter asset pipeline — from a single EIA-310 rack cabinet to a fully dressed multi-bay facility section ready for UE5 import.
+
+### The Full Pipeline
 
 ```
-LLM Frontend  ──HTTP──▶  MCP Server (inside Blender)  ──bpy──▶  Blender Scene
-  (Claude,               FastMCP / uvicorn                       objects, materials,
-   Cursor, etc.)         http://127.0.0.1:8400/mcp               lights, render…
+create_facility_section          ← lay out a grid of bays
+  └─ create_rack_row             ← hot-aisle / cold-aisle row pairs
+       └─ create_rack_cabinet    ← EIA-310 compliant 42U cabinet (origin at base-front-centre)
+            └─ populate_rack_procedural   ← fill with servers, switches, patch panels
+                 └─ route_cables_between_racks  ← NURBS cable curves on tray paths
+                      └─ randomize_facility_variation  ← procedural wear, dust, damage
+                           └─ apply_facility_theme     ← aged_colo / post_incident / crisis
+                                └─ export_facility_layout_json  ← UE5 manifest + FBX
 ```
 
-The addon starts a lightweight HTTP server inside Blender's Python process. Every tool call is dispatched to Blender's main thread using `bpy.app.timers`, keeping the UI responsive and the API calls thread-safe. The server speaks the [MCP Streamable HTTP](https://spec.modelcontextprotocol.io/) transport, which all modern MCP clients support.
+### 198 Tools Across 12 Modules
+
+| Module | Tools | What It Builds |
+|---|---:|---|
+| `server` (core) | 62 | Scene queries, transforms, materials, render, export primitives |
+| `rack_tools` | 25 | EIA-310 rack cabinets, rails, doors, blanks, cable managers |
+| `mesh_tools` | 12 | Hard-surface mesh primitives, booleans, bevels, chamfers |
+| `gn_tools` | 7 | Geometry Nodes setups: EIA holes, perforated panels, cable bundles |
+| `export_tools` | 14 | UE5 FBX pipeline: transforms, LODs, manifests, socket embedding |
+| `equipment_tools` | 9 | Equipment kitbashing, rack population, slot assignment |
+| `material_tools` | 12 | PBR materials, LED states, brushed metal, anodised finishes |
+| `bay_tools` | 11 | Hot/cold aisle bays, rack rows, raised-floor tiles, containment |
+| `cable_tools` | 12 | NURBS cable paths, bundles, trays, patch panels, routing validation |
+| `variation_tools` | 11 | Procedural wear, dust, damage nodes, failure states, themes |
+| `facility_tools` | 11 | Multi-bay sections, corridors, power/cooling zones, UPS/CRAC |
+| `polish_tools` | 12 | Undo checkpoints, session log, scene inventory, documentation gen |
+
+### Phase 9 Safety Layer
+
+The `polish_tools` module adds a professional-grade safety net for long asset-building sessions:
+
+- **`push_undo_checkpoint`** — Named Blender undo steps before any destructive operation
+- **`confirm_destructive`** — Dry-run pre-flight for `clear_cables`, `reset_variation`, etc.
+- **`backup_section_metadata`** — Snapshot all custom properties to JSON; restore after reloads
+- **`quick_save_scene`** — Timestamped `.blend` copy without touching your working file
+- **`suggest_next_step`** — Scene-aware AI recommendations with pre-filled tool arguments
+- **`validate_entire_scene`** — One-call health check before every export
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install the addon (see Installation below)
+# 2. In Blender: N-Panel → BlendDC tab → ▶ Start MCP Server
+# 3. Connect your AI client to http://127.0.0.1:8400/mcp
+```
+
+Then ask your AI:
+
+> *"Build me a 2×3 section of datacenter bays with hot-aisle containment, route ethernet cables between racks, apply aged_colo variation, then export to `/tmp/uptime_exports/` as a UE5 manifest."*
+
+The AI calls `create_facility_section` → `route_cables_between_racks` →
+`apply_facility_theme` → `export_facility_layout_json` — and reports back when done.
+
+### Example Tool Calls
+
+```python
+# Create a 2×4 facility section, fully populated
+create_facility_section(
+    section_name          = "DC_Floor_01",
+    bays_x                = 2,
+    bays_y                = 4,
+    racks_per_bay         = 6,
+    populate_preset       = "standard_3tier",
+    hot_aisle_containment = True,
+)
+
+# Apply a post-incident theme with a named epicentre bay
+apply_facility_theme(
+    section_name  = "DC_Floor_01",
+    theme         = "post_incident",
+    epicenter_bay = "Bay_DC_Floor_01_1_2",
+)
+
+# Export the full facility — manifest + cables + variation metadata
+export_facility_layout_json(
+    section_name      = "DC_Floor_01",
+    output_path       = "/tmp/uptime/DC_Floor_01_layout.json",
+    include_cables    = True,
+    include_variation = True,
+)
+```
 
 ---
 
 ## Installation
 
-### 1. Download the addon
+### Option A — Pre-built zip (recommended)
 
-**Option A — Pre-built zip (recommended)**
+1. Download `blenddcmcp_v3.0.0.zip` from the [Releases](../../releases) page
+2. Open Blender → **Edit → Preferences → Add-ons → Install…**
+3. Select the zip → enable **BlendDC-MCP - Datacenter Asset Factory for UPTIME**
 
-Download `universal_blender_mcp_vX.Y.Z.zip` from the [Releases](../../releases) page.
-
-**Option B — Build from source**
+### Option B — Build from source
 
 ```bash
-git clone https://github.com/DaRealDaHoodie/universal-blender-mcp.git
-cd universal-blender-mcp
-python3 build_addon.py        # creates dist/universal_blender_mcp_v*.zip
+git clone https://github.com/DaRealDaHoodie/BlendDC-MCP.git
+cd BlendDC-MCP
+python3 build_addon.py        # writes dist/blenddcmcp_v3.0.0.zip
 ```
 
-### 2. Install in Blender
+Then install the zip as above.
 
-1. Open Blender
-2. **Edit → Preferences → Add-ons → Install…**
-3. Select the `.zip` file
-4. Enable **Universal Blender MCP** in the add-on list
+### First Start
 
-### 3. Start the server
+1. Press **N** in the 3D Viewport → **BlendDC** tab → **▶ Start MCP Server**
+2. On first start, `fastmcp` and `uvicorn` install automatically into `addon/lib/`
+   — no system packages required, no admin rights needed
+3. The System Console confirms:
 
-1. Press **N** in the 3D Viewport to open the N-Panel
-2. Go to the **MCP** tab
-3. Click **▶ Start MCP Server**
-
-On first start the addon automatically installs `fastmcp` and `uvicorn` into Blender's Python — this takes about 30 seconds and only happens once.
-
-The server runs at:
 ```
-http://127.0.0.1:8400/mcp
+[BlendDC-MCP] Schema cache ready — 198 tools in 1.2s
+[BlendDC-MCP] Server running — http://127.0.0.1:8400/mcp
 ```
 
----
+### Connect Your AI Client
 
-## Connecting Your LLM Frontend
-
-### Claude Desktop
-
-Claude Desktop requires an `mcp-remote` bridge to connect to HTTP servers.
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
+**Claude Desktop** (`~/.claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
-    "blender": {
+    "blenddcmcp": {
       "command": "npx",
-      "args": [
-        "mcp-remote",
-        "http://127.0.0.1:8400/mcp"
-      ]
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8400/mcp"]
     }
   }
 }
 ```
 
-> **Note:** The `"type": "streamable-http"` syntax used by Claude Code is not supported in Claude Desktop's config format. The `mcp-remote` bridge wraps the HTTP server in a stdio process that Claude Desktop can connect to.
+**Cursor / Continue.dev** — Add MCP server `http://127.0.0.1:8400/mcp` in settings.
 
-### Claude Code
+**LM Studio** — MCP Servers → Add → `http://127.0.0.1:8400/mcp`.
 
-Add to `~/.claude/mcp.json` (global) or `.mcp.json` in your project root:
+---
 
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "type": "http",
-      "url": "http://127.0.0.1:8400/mcp"
-    }
-  }
-}
-```
+## Running the Test Suite
 
-Or add it directly from the terminal:
+A full integration test validates the pipeline end-to-end — facility creation through UE5 export — from outside Blender via the live MCP endpoint:
 
 ```bash
-claude mcp add --transport http blender http://127.0.0.1:8400/mcp
+# Start the server in Blender first, then from a terminal:
+python3 tests/full_uptime_pipeline_test.py
+
+# Override the export directory:
+OUTPUT_DIR=~/Desktop/uptime_test python3 tests/full_uptime_pipeline_test.py
 ```
 
-### Cursor
+The test runner covers 7 phases and prints `[PASS]` / `[WARN]` / `[FAIL]` per check with timing and a final summary. Requires only the Python standard library — no extra packages.
 
-Add to `.cursor/mcp.json` (or Cursor's MCP settings):
-
-```json
-{
-  "mcpServers": {
-    "blender": {
-      "type": "streamable-http",
-      "url": "http://127.0.0.1:8400/mcp"
-    }
-  }
-}
 ```
-
-### Continue.dev
-
-Add to `~/.continue/config.yaml`:
-
-```yaml
-mcpServers:
-  - name: Blender
-    type: streamable-http
-    url: http://127.0.0.1:8400/mcp
-```
-
-### LM Studio
-
-Add to `mcp.json`:
-
-```json
-{
-  "servers": [
-    {
-      "name": "Blender",
-      "type": "remote",
-      "url": "http://127.0.0.1:8400/mcp"
-    }
-  ]
-}
-```
-
-### Quick test (curl)
-
-```bash
-curl -X POST http://127.0.0.1:8400/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '{
-    "jsonrpc": "2.0", "id": 1,
-    "method": "initialize",
-    "params": {
-      "protocolVersion": "2024-11-05",
-      "capabilities": {},
-      "clientInfo": {"name": "test", "version": "1.0"}
-    }
-  }'
+══════════════════════════════════════════════════════════════════════
+  UPTIME PIPELINE TEST SUMMARY   (14.3s total)
+══════════════════════════════════════════════════════════════════════
+  Passed :  47
+  Warned :   3
+  Failed :   0
+  ✓  ALL TESTS PASSED
 ```
 
 ---
 
-## Available Tools (59)
+## Architecture
 
-### Objects
-| Tool | Description |
-|------|-------------|
-| `list_objects` | List all objects in the scene |
-| `get_object_info` | Get location, rotation, scale, type, dimensions, visibility |
-| `create_object` | Add a primitive (cube, sphere, cylinder, plane, cone, torus) |
-| `delete_object` | Remove an object by name |
-| `rename_object` | Rename an object |
-| `duplicate_object` | Copy an object |
-| `join_objects` | Join a list of mesh objects into one |
-| `parent_objects` | Set a parent-child relationship between two objects |
-| `move_object` | Set absolute world-space location |
-| `rotate_object` | Set rotation in radians (XYZ Euler) |
-| `scale_object` | Scale per-axis |
-| `apply_transforms` | Apply location / rotation / scale to mesh data |
-| `set_origin` | Move the object origin (to geometry, cursor, mass centre…) |
-| `set_object_visibility` | Show / hide in viewport and render |
-| `set_active_object` | Select and make active |
+```
+BlendDC-MCP/
+├── addon/
+│   └── universal_blender_mcp/     # Blender addon package
+│       ├── __init__.py            # bl_info, server start/stop, N-Panel UI
+│       ├── core.py                # FastMCP instance, @thread_safe, middleware
+│       ├── constants.py           # EIA-310 dimensions, UE5 axis conventions
+│       ├── server.py              # 62 core tools + module import registry
+│       ├── rack_tools.py          # 25 rack cabinet tools
+│       ├── mesh_tools.py          # 12 hard-surface mesh tools
+│       ├── gn_tools.py            # 7 Geometry Nodes tools
+│       ├── export_tools.py        # 14 UE5 export pipeline tools
+│       ├── equipment_tools.py     # 9 equipment kitbash + population tools
+│       ├── material_tools.py      # 12 material + texturing tools
+│       ├── bay_tools.py           # 11 bay + row generation tools
+│       ├── cable_tools.py         # 12 cable management + routing tools
+│       ├── variation_tools.py     # 11 variation + failure state tools
+│       ├── facility_tools.py      # 11 facility layout + export tools
+│       └── polish_tools.py        # 12 polish, UX, safety + documentation tools
+├── tests/
+│   ├── uptime_pipeline_test.py       # In-Blender test (Scripting workspace)
+│   └── full_uptime_pipeline_test.py  # External integration test (v3.0.0)
+├── docs/
+│   └── tool_reference.md          # Full 198-tool reference (auto-generated)
+├── build_addon.py
+├── CHANGELOG.md
+└── README.md
+```
 
-### Selection
-| Tool | Description |
-|------|-------------|
-| `get_selected_objects` | Return names of currently selected objects |
-| `select_objects` | Select a list of objects by name |
+### Key Design Decisions
 
-### Materials
-| Tool | Description |
-|------|-------------|
-| `list_materials` | List all materials in the file |
-| `assign_material` | Create or assign a material with a base color |
-| `set_material_color` | Update the Base Color of an existing material |
-| `set_material_property` | Set Metallic, Roughness, Emission Strength, etc. |
-| `delete_material` | Remove a material |
+**Thread safety** — Every Blender API call is dispatched to the main thread via `bpy.app.timers.register()`. The uvicorn HTTP server runs in a daemon thread; the `@thread_safe` decorator queues work to the main thread and blocks until complete.
 
-### Lights
-| Tool | Description |
-|------|-------------|
-| `add_light` | Add POINT / SUN / SPOT / AREA light |
+**Copy-on-write materials** — Variation tools copy shared materials before injecting shader nodes, so identical-looking neighbours are never unintentionally modified. Injected nodes are labelled `[WEAR]`, `[DUST]`, `[DAMAGE]` for clean removal by `reset_variation`.
 
-### Camera
-| Tool | Description |
-|------|-------------|
-| `add_camera` | Add a new camera |
-| `set_active_camera` | Set which camera is used for rendering |
-| `set_camera_properties` | Adjust focal length and clip distances |
-| `point_camera_at` | Add a Track-To constraint to aim a camera at an object |
+**Self-contained modules** — Each tool module copies required helpers rather than importing from sibling modules, preventing circular import failures during server hot-reload.
 
-### Modifiers
-| Tool | Description |
-|------|-------------|
-| `add_modifier` | Add a modifier (SUBSURF, BEVEL, SOLIDIFY, MIRROR, ARRAY…) |
-| `list_modifiers` | List all modifiers on an object |
-| `set_modifier_property` | Change any modifier property by attribute name |
-| `apply_modifier` | Collapse a modifier into the mesh |
+**EIA-310 compliance** — 44.45 mm per U, 482.6 mm inner rail span, rack origin at base-front-centre. All dimensions verified against real-world rack datasheets.
 
-### Animation
-| Tool | Description |
-|------|-------------|
-| `set_scene_frame` | Jump to an animation frame |
-| `set_frame_range` | Set scene start and end frames |
-| `insert_keyframe` | Insert a keyframe for location / rotation / scale |
-| `get_keyframes` | List all keyframes on an object grouped by data path |
-
-### Rendering
-| Tool | Description |
-|------|-------------|
-| `render_preview` | Fast OpenGL viewport render → returns PNG path |
-| `full_render` | Full CPU/GPU render → saves to output path |
-| `set_render_engine` | Switch between EEVEE, Cycles, Workbench |
-| `set_render_resolution` | Set render width, height, and percentage |
-| `set_render_output` | Set output file path and format |
-
-### Scene & World
-| Tool | Description |
-|------|-------------|
-| `get_scene_info` | Scene name, frame range, FPS, object count, render settings |
-| `clear_scene` | Remove all (or all non-camera/light) objects |
-| `save_file` | Save the current .blend file |
-| `set_world_color` | Set the world background to a solid color |
-
-### Collections
-| Tool | Description |
-|------|-------------|
-| `list_collections` | List all collections |
-| `create_collection` | Create a new collection |
-| `move_to_collection` | Move an object into a collection |
-
-### 3D Cursor
-| Tool | Description |
-|------|-------------|
-| `get_cursor_location` | Get the 3D cursor position |
-| `set_cursor_location` | Move the 3D cursor |
-
-### Viewport
-| Tool | Description |
-|------|-------------|
-| `set_viewport_shading` | Switch between WIREFRAME / SOLID / MATERIAL / RENDERED |
-
-### Text
-| Tool | Description |
-|------|-------------|
-| `add_text_object` | Add a 3D text object with optional extrusion |
-
-### Import / Export
-| Tool | Description |
-|------|-------------|
-| `import_file` | Import .obj, .fbx, .glb/.gltf, .stl, .ply, .abc, .usd, .x3d |
-| `export_file` | Export to .obj, .fbx, .glb/.gltf, .stl, .ply, .abc, .usd, .x3d |
-| `batch_export` | Export every mesh in a collection as a separate FBX or GLB file |
-
-### UV & Texturing
-| Tool | Description |
-|------|-------------|
-| `unwrap_uv` | UV unwrap a mesh (smart_project / unwrap / cube_project) |
-| `set_material_texture` | Load an image and wire it into a material channel (Base Color, Normal, Roughness, Metallic, Emission) |
-
-### Baking
-| Tool | Description |
-|------|-------------|
-| `bake_texture` | Bake NORMAL / AO / DIFFUSE / ROUGHNESS from a high-poly onto a low-poly object via Cycles |
-
-### Mesh Editing
-| Tool | Description |
-|------|-------------|
-| `edit_mesh` | Loop cut, inset, extrude, merge by distance, or set smooth/flat shading |
-
-### Scripting
-| Tool | Description |
-|------|-------------|
-| `execute_python` | Run arbitrary Python in Blender's environment |
+**UE5 axis convention** — FBX exports use `-X` forward, `Z` up (`axis_forward='-X'`, `axis_up='Z'`) at `FBX Units Scale` so racks import at correct real-world metre scale with no manual correction.
 
 ---
 
-## Advanced Features (v1.3+)
+## Generating the Tool Reference
 
-Three layered capabilities that let the agent reach Blender's full API surface — not just the 59 static tools — using a `discover → docs → execute` chain.
-
-### `discover_api` — Live API Discovery
-
-Searches the full `bpy.ops.*`, `bpy.types.*`, and `bpy.data.*` namespace using keyword and fuzzy matching. The index is built once on first call (≈ 3 s) and cached to disk; subsequent calls are instant.
-
-```
-discover_api("bevel")
-→ bpy.ops.mesh.bevel(), bpy.types.BevelModifier, …
-
-discover_api("mirror", category="ops")
-→ bpy.ops.mesh.symmetrize(), bpy.ops.object.modifier_add type=MIRROR, …
-```
-
-### `query_api_docs` — TF-IDF Doc Search
-
-Builds a TF-IDF index over every `bpy.ops` and `bpy.types` docstring at first use (cached to disk). Returns the top-N most relevant entries with summaries and usage examples — zero network requests, no extra dependencies.
-
-```
-query_api_docs("how to apply a subdivision surface modifier")
-→ bpy.types.SubsurfModifier — subdivision surface modifier …
-  bpy.ops.object.modifier_apply — Apply active modifier on the active object …
-```
-
-### `execute_safe_python` — Safe Code Execution
-
-An enhanced version of `execute_python` with:
-- **Undo push** before execution — all changes are reversible with Ctrl-Z
-- **Dry-run mode** (`dry_run=True`) — validates syntax and flags dangerous patterns without executing
-- **Result capture** — name a variable `result` in your code and it's returned in the response
-- **Output sanitization** — no raw `bpy` objects in the response; everything is JSON-safe
-- **Rate limiting** — capped at 10 calls per 60 seconds
+The full 198-tool reference with parameter tables is auto-generated from live docstrings. Start the server and ask your AI:
 
 ```python
-# Agent can chain all three:
-discover_api("subdivision surface")          # find the right operator/type
-query_api_docs("subdivide mesh evenly")      # understand the parameters
-execute_safe_python("""
-import bpy
-obj = bpy.context.active_object
-mod = obj.modifiers.new("Subdiv", "SUBSURF")
-mod.levels = 3
-result = f"Added subdivision modifier at level {mod.levels}"
-""", push_undo=True)
+export_tool_reference(
+    output_path = "/path/to/BlendDC-MCP/docs/tool_reference.md",
+    format      = "markdown",
+)
 ```
+
+See the current reference: [docs/tool_reference.md](docs/tool_reference.md)
 
 ---
 
-## Project Structure
+## Built for UPTIME
 
-```
-universal-blender-mcp/
-├── addon/
-│   └── universal_blender_mcp/   ← installable Blender addon
-│       ├── __init__.py           ← bl_info, UI panel, server management
-│       ├── server.py             ← FastMCP tools (59 static + 3 advanced)
-│       ├── discovery.py          ← bpy API indexer + keyword/fuzzy search
-│       └── rag_store.py          ← TF-IDF doc store over bpy docstrings
-├── build_addon.py               ← builds the installable .zip
-├── pyproject.toml
-└── LICENSE
-```
+BlendDC-MCP was designed for a single purpose: building the asset pipeline for **UPTIME**, a UE5 game where players operate and expand a real-scale datacenter.
 
----
+Every design decision reflects that goal:
 
-## Building a Release
-
-```bash
-python3 build_addon.py
-# → dist/universal_blender_mcp_v1.3.0.zip
-```
+- **Real-world dimensions** — racks, equipment, cables, and aisles match actual datacenter specifications so gameplay feels physically accurate
+- **Variation system** — aged equipment, post-incident failure states, and hot-zone wear gradients give each section a believable history
+- **UE5-first export** — `SOCKET_` attachment points, LOD sets, manifests, and spline-ready cable control points are designed for UE5's StaticMesh and PCG workflows
+- **Facility-scale output** — a single `create_facility_section` call produces a complete, populated, variation-dressed section ready for UE5 level import
 
 ---
 
 ## Requirements
 
-- Blender 4.0 or later (Python 3.11+)
-- Internet connection on first start (to download `fastmcp` and `uvicorn`)
+- Blender **4.0 or newer** (tested on 4.x and 5.x)
+- Internet access on first start (to install `fastmcp` and `uvicorn` into `addon/lib/`)
+- Any MCP-compatible AI client
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+[MIT License](LICENSE) — © 2026 DaRealDaHoodie
+
+---
+
+*BlendDC-MCP is an independent project and is not affiliated with Autodesk, Epic Games, or Anthropic.*
