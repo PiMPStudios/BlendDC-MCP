@@ -65,9 +65,14 @@ def _create_box_object(
     obj  = bpy.data.objects.new(name, mesh)
 
     bm = bmesh.new()
-    # create_box generates a 2×2×2 cube; diagonal matrix scales to exact w×d×h
+    # create_cube(size=2.0) generates a 2×2×2 cube (vertices at ±1.0);
+    # the diagonal matrix then scales each axis to the exact target dimension:
+    #   X: ±1 × w*0.5 → ±w/2  (total width  = w)
+    #   Y: ±1 × d*0.5 → ±d/2  (total depth  = d)
+    #   Z: ±1 × h*0.5 → ±h/2  (total height = h)
+    # NOTE: size=1.0 would give a 1×1×1 cube (±0.5) producing half-size geometry.
     scale = mathutils.Matrix.Diagonal((w * 0.5, d * 0.5, h * 0.5, 1.0))
-    bmesh.ops.create_cube(bm, size=1.0, matrix=scale)
+    bmesh.ops.create_cube(bm, size=2.0, matrix=scale)
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()
@@ -413,21 +418,49 @@ def create_rack_cabinet(
     #   X = 0  (rack centreline)
     #   Y = 0  (front face of the front posts)
     #   Z = 0  (floor / base of cabinet)
-    # For the joined mesh this is a single cursor operation after join.
-    # For the un-joined case every individual part gets the same pivot so
-    # each piece is independently importable with the correct world anchor.
+    #
+    # Join strategy: pure bmesh combine — avoids bpy.ops.object.join() which
+    # requires a visible 3D viewport context and can silently cancel when called
+    # from an addon/MCP context without an active area.
+    #
+    # Each part is created with obj.location = (cx, cy, cz) so its vertices are
+    # in LOCAL space centred at the part centre.  We apply the object's world
+    # matrix into the vertex positions before merging so every vertex lands at
+    # its correct world position in the final combined mesh.  The resulting
+    # joined object is placed at location (0, 0, 0) — its origin IS already the
+    # base-front-centre without any cursor trick needed.
     joined_obj_name = None
     if join_mesh and len(all_objs) >= 2:
-        bpy.ops.object.select_all(action='DESELECT')
-        for obj in all_objs:
-            obj.select_set(True)
-        bpy.context.view_layer.objects.active = all_objs[0]
-        bpy.ops.object.join()
-        joined = bpy.context.active_object
-        joined.name = col_name
+        combined_bm = bmesh.new()
+        tmp_meshes: List[bpy.types.Mesh] = []
+
+        for part in all_objs:
+            # Copy mesh data and bake world transform into vertex positions
+            tmp = part.data.copy()
+            tmp.transform(part.matrix_world)
+            combined_bm.from_mesh(tmp)   # BMesh.from_mesh APPENDS geometry
+            tmp_meshes.append(tmp)
+
+        combined_mesh = bpy.data.meshes.new(col_name)
+        combined_bm.to_mesh(combined_mesh)
+        combined_bm.free()
+        combined_mesh.update()
+
+        # Create the joined object at the world origin — no cursor trick required
+        joined = bpy.data.objects.new(col_name, combined_mesh)
+        joined.location = (0.0, 0.0, 0.0)
+        col.objects.link(joined)
+
+        # Remove individual part objects and free their mesh data
+        part_meshes = [p.data for p in all_objs]
+        for part in all_objs:
+            bpy.data.objects.remove(part, do_unlink=True)
+        for m in part_meshes + tmp_meshes:
+            if m.users == 0:
+                bpy.data.meshes.remove(m)
+
         joined_obj_name = joined.name
-        # One cursor operation on the finished mesh — cleanest, most reliable
-        _set_origin_to(joined, (0.0, 0.0, 0.0))
+
     else:
         # Each part gets origin at base-front-centre for consistent export
         for obj in all_objs:
