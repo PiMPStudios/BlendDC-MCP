@@ -6,7 +6,7 @@ Usage:
     python build_addon.py
 
 Output:
-    dist/universal_blender_mcp_v{version}.zip
+    dist/blenddcmcp_v{version}.zip
 
 Install in Blender:
     Edit > Preferences > Add-ons > Install... > select the zip > Enable addon
@@ -17,7 +17,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-ADDON_DIR = Path(__file__).parent / "addon" / "universal_blender_mcp"
+ADDON_DIR = Path(__file__).parent / "addon" / "blenddc_mcp"
 DIST_DIR = Path(__file__).parent / "dist"
 
 
@@ -38,7 +38,7 @@ def build():
         sys.exit(f"ERROR: Addon directory not found: {ADDON_DIR}")
 
     version = _read_version()
-    zip_name = f"universal_blender_mcp_v{version}.zip"
+    zip_name = f"blenddcmcp_v{version}.zip"
 
     DIST_DIR.mkdir(exist_ok=True)
     zip_path = DIST_DIR / zip_name
@@ -49,7 +49,7 @@ def build():
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for filepath in sorted(files):
-            arcname = Path("universal_blender_mcp") / filepath.relative_to(ADDON_DIR)
+            arcname = Path("blenddc_mcp") / filepath.relative_to(ADDON_DIR)
             zf.write(filepath, arcname)
             print(f"  + {arcname}")
 

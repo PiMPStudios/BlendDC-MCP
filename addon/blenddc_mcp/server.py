@@ -1597,7 +1597,14 @@ def edit_mesh(
 # ── Register additional tool modules (side-effect registration) ────────────
 # Each import causes @mcp.tool() decorators to run, registering tools on the
 # shared `mcp` instance from core.py.
-import rack_tools    # noqa: F401, E402  — 14 rack cabinet tools
-import mesh_tools    # noqa: F401, E402  — 11 hard-surface mesh tools
-import gn_tools      # noqa: F401, E402  — 6 Geometry Nodes management tools
-import export_tools  # noqa: F401, E402  — 6 UE5 export pipeline tools
+import rack_tools       # noqa: F401, E402  — 25 rack cabinet tools
+import mesh_tools       # noqa: F401, E402  — 12 hard-surface mesh tools
+import gn_tools         # noqa: F401, E402  — 7 Geometry Nodes management tools
+import export_tools     # noqa: F401, E402  — 13 UE5 export pipeline tools
+import equipment_tools  # noqa: F401, E402  — 9 equipment kitbash + population tools
+import material_tools   # noqa: F401, E402  — 11 material + texturing tools
+import bay_tools        # noqa: F401, E402  — 11 bay + row generation tools
+import cable_tools      # noqa: F401, E402  — 12 cable management + routing tools
+import variation_tools  # noqa: F401, E402  — 11 variation + failure state tools
+import facility_tools   # noqa: F401, E402  — 11 facility layout + export tools
+import polish_tools    # noqa: F401, E402  — 12 polish, UX, safety + documentation tools

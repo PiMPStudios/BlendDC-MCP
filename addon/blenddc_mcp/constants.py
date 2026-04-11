@@ -73,3 +73,27 @@ UE5_MESH_SMOOTH    = 'FACE'
 
 UCX_PREFIX    = 'UCX_'     # UE5 automatic collision mesh prefix
 SOCKET_PREFIX = 'SOCKET_'  # UE5 socket attachment point prefix
+
+# ── Door geometry ──────────────────────────────────────────────────────────
+# Front/rear door panel (sheet metal, no frame — hinges on left, latch right)
+DOOR_SHEET_THICK_M = 0.002    # 2 mm door skin (slightly thicker than panels)
+
+# Vent slot pattern defaults (used by add_door_vent_pattern GN tool)
+DOOR_VENT_SLOT_W_M  = 0.010   # 10 mm slot width
+DOOR_VENT_SLOT_H_M  = 0.050   # 50 mm slot height
+DOOR_VENT_GAP_X_M   = 0.012   # horizontal gap between slots
+DOOR_VENT_GAP_Y_M   = 0.008   # vertical gap between slots
+DOOR_VENT_MARGIN_M  = 0.040   # edge margin (no slots within 40 mm of edge)
+
+# ── Cable management ───────────────────────────────────────────────────────
+BRUSH_STRIP_HEIGHT_M     = RACK_U_M       # 1U tall (44.45 mm)
+BRUSH_STRIP_DEPTH_M      = 0.050          # 50 mm stub depth
+CABLE_ENTRY_CUTOUT_W_M   = 0.100          # default cutout width (100 mm)
+CABLE_ENTRY_CUTOUT_H_M   = RACK_U_M       # default cutout height (1U)
+CABLE_TRAY_DEPTH_M       = 0.060          # top tray channel depth (Z)
+CABLE_TRAY_WALL_THICK_M  = 0.002          # tray side wall thickness
+VERT_CABLE_MGMT_WIDTH_M  = 0.050          # 50 mm vertical channel width
+
+# ── LOD defaults ───────────────────────────────────────────────────────────
+LOD1_DEFAULT_RATIO = 0.40   # LOD1 target: 40 % of LOD0 triangles
+LOD2_DEFAULT_RATIO = 0.15   # LOD2 target: 15 % of LOD0 triangles

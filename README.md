@@ -190,7 +190,7 @@ The test runner covers 7 phases and prints `[PASS]` / `[WARN]` / `[FAIL]` per ch
 ```
 BlendDC-MCP/
 ├── addon/
-│   └── universal_blender_mcp/     # Blender addon package
+│   └── blenddc_mcp/               # Blender addon package
 │       ├── __init__.py            # bl_info, server start/stop, N-Panel UI
 │       ├── core.py                # FastMCP instance, @thread_safe, middleware
 │       ├── constants.py           # EIA-310 dimensions, UE5 axis conventions

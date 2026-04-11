@@ -13,7 +13,7 @@ build/
 
 # ── Addon runtime dependencies ────────────────────────────────────────────
 # Installed automatically on first server start — never commit these.
-addon/universal_blender_mcp/lib/
+addon/blenddc_mcp/lib/
 
 # ── Virtual environments ──────────────────────────────────────────────────
 .venv/
