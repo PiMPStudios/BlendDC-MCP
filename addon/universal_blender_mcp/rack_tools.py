@@ -29,6 +29,7 @@ from constants import (
     RACK_DEFAULT_WIDTH_MM, RACK_DEFAULT_DEPTH_MM,
     RACK_BASE_HEIGHT_M, RACK_BASE_HEIGHT_MM,
     RACK_TOP_HEIGHT_M, RACK_TOP_HEIGHT_MM,
+    RACK_INTERIOR_HEIGHT_MM, RACK_INTERIOR_HEIGHT_M,
     RACK_POST_SIZE_M, RACK_POST_SIZE_MM,
     RACK_SHEET_THICK_M, RACK_SHEET_THICK_MM,
     RACK_RAIL_THICK_M, RACK_RAIL_THICK_MM,
@@ -36,6 +37,7 @@ from constants import (
     HINGE_PIN_DIAM_M, HINGE_PIN_HEIGHT_M, HINGE_COUNT_PER_DOOR,
     LATCH_WIDTH_M, LATCH_HEIGHT_M, LATCH_DEPTH_M,
     ANCHOR_INSET_M,
+    HINGE_POSITIONS,
 )
 
 
@@ -86,6 +88,81 @@ def _set_origin_to(
             bpy.context.scene.cursor.location = saved
 
 
+def _create_l_rail(
+    name: str,
+    sign_x: int,
+    cy: float,
+    flange_cy: float,
+    cz: float,
+    height: float,
+    rt: float,
+    rf: float,
+    ps: float,
+    hs: float,
+    collection: bpy.types.Collection,
+) -> List[bpy.types.Object]:
+    """
+    Create a continuous L-bracket mounting rail as two clean solid boxes.
+
+    The rail spans the full usable interior height (u_height × RACK_U_M) without
+    any slot divisions or Boolean cuts — EIA-310 holes are added via Geometry Nodes
+    in Phase 3.
+
+    Cross-section viewed from above (left front rail, sign_x = -1):
+
+        Y=0 (front face)
+        ↓
+        [flange rf×rf]|web rt×ps| post ...
+        ←rf→          ↑
+                inner face at −hs (EIA-310 = −241.3 mm)
+
+    The web spans the full post depth (ps) in Y.
+    The flange is rf wide inward (X) and rf deep front-to-back (Y), positioned
+    flush with the post face: flange_cy = rf/2 for front rails (Y=0 → Y=rf),
+    flange_cy = depth−rf/2 for rear rails (Y=depth−rf → Y=depth).
+
+    sign_x:    -1 = left rail, +1 = right rail
+    cy:        Y-centre of the web (= post Y-centre, e.g. ps/2 for front posts)
+    flange_cy: Y-centre of the flange (rf/2 for front, rack_depth−rf/2 for rear)
+    cz:        Z-centre of the rail (= base_h + rail_h / 2)
+    height:    full interior rail height (u_height × RACK_U_M = 1866.9 mm @ 42U)
+    rt:        web thickness  (RACK_RAIL_THICK_M  = 3 mm)
+    rf:        flange inward projection AND front-to-back depth
+               (RACK_RAIL_FLANGE_M = 20 mm — same value for both dimensions)
+    ps:        post size — web depth in Y (RACK_POST_SIZE_M = 60 mm)
+    hs:        half EIA rail span (EIA_RAIL_SPAN_M / 2 = 241.3 mm)
+
+    Returns [web_obj, flange_obj].
+    """
+    objs: List[bpy.types.Object] = []
+
+    # Vertical web — rt thick × ps deep × full height
+    # Outer face sits at ±(hs + rt); inner face at ±hs (EIA inner-face line)
+    web = _create_box_object(
+        f"{name}_web",
+        cx=sign_x * (hs + rt / 2),
+        cy=cy,
+        cz=cz,
+        w=rt, d=ps, h=height,
+        collection=collection,
+    )
+    objs.append(web)
+
+    # Horizontal flange — rf inward (X) × rf deep (Y) × full height
+    # Flush with the post face for proper equipment mounting clearance
+    flange = _create_box_object(
+        f"{name}_flange",
+        cx=sign_x * (hs - rf / 2),
+        cy=flange_cy,
+        cz=cz,
+        w=rf, d=rf, h=height,
+        collection=collection,
+    )
+    objs.append(flange)
+
+    return objs
+
+
 def _add_door_hardware(
     name_prefix: str,
     w: float,
@@ -101,9 +178,7 @@ def _add_door_hardware(
 
     # ── Hinge pins (left front, 3 per door) ──────────────────────────────
     hinge_z_positions = [
-        base_h + rail_h * 0.10,
-        base_h + rail_h * 0.50,
-        base_h + rail_h * 0.90,
+        base_h + rail_h * pos for pos in HINGE_POSITIONS
     ]
     for i, hz in enumerate(hinge_z_positions):
         hinge = _create_box_object(
@@ -255,38 +330,34 @@ def create_rack_cabinet(
         )
         all_objs.append(post)
 
-    # ── Mounting rails (vertical plate + inward flange, all 4 posts) ──────
-    # Vertical plate: thin strip at EIA inner-face X, full rail height
-    # Horizontal flange: extends 20 mm into rack interior from inner face
+    # ── Mounting rails — continuous L-brackets, full interior height ──────
+    # Four rails: front-left, front-right, rear-left, rear-right.
+    # Each is a clean two-piece solid (web + flange) — no Boolean cuts.
+    # EIA-310 holes are added procedurally via Geometry Nodes in Phase 3.
+    #
+    # flange_cy positions the flange flush with the post face:
+    #   front rails → rf/2      (flange occupies Y = 0 … rf)
+    #   rear  rails → d − rf/2  (flange occupies Y = d−rf … d)
     rail_configs = [
-        # (tag, sign_x, post_cy, flange_sign)
-        ("LF", -1, post_cy_f, +1),   # left-front, flange extends right (+X)
-        ("RF", +1, post_cy_f, -1),   # right-front, flange extends left (-X)
-        ("LR", -1, post_cy_r, +1),   # left-rear
-        ("RR", +1, post_cy_r, -1),   # right-rear
+        # (tag,  sign_x, web_cy,    flange_cy)
+        ("LF",   -1,     post_cy_f, rf / 2),
+        ("RF",   +1,     post_cy_f, rf / 2),
+        ("LR",   -1,     post_cy_r, d - rf / 2),
+        ("RR",   +1,     post_cy_r, d - rf / 2),
     ]
-    for tag, sx, rcy, fx in rail_configs:
-        # Vertical web
-        vp = _create_box_object(
-            f"{col_name}_rail_{tag}_vp",
-            cx=sx * (half_span + rt / 2),
+    for tag, sx, rcy, fcy in rail_configs:
+        parts = _create_l_rail(
+            name=f"{col_name}_rail_{tag}",
+            sign_x=sx,
             cy=rcy,
+            flange_cy=fcy,
             cz=bh + rh / 2,
-            w=rt, d=ps, h=rh,
+            height=rh,
+            rt=rt, rf=rf, ps=ps,
+            hs=half_span,
             collection=col,
         )
-        all_objs.append(vp)
-
-        # Horizontal flange (extends inward from inner face)
-        fl = _create_box_object(
-            f"{col_name}_rail_{tag}_fl",
-            cx=sx * half_span + fx * rf / 2,
-            cy=rcy,
-            cz=bh + rh / 2,
-            w=rf, d=rt, h=rh,
-            collection=col,
-        )
-        all_objs.append(fl)
+        all_objs.extend(parts)
 
     # ── Side panels ────────────────────────────────────────────────────────
     if include_side_panels:
@@ -329,11 +400,14 @@ def create_rack_cabinet(
         hw = _add_door_hardware(col_name, w=w, base_h=bh, rail_h=rh, collection=col)
         all_objs.extend(hw)
 
-    # ── Set all origins to base-front-centre (0, 0, 0) ────────────────────
-    for obj in all_objs:
-        _set_origin_to(obj, (0.0, 0.0, 0.0))
-
-    # ── Join all parts into one mesh ───────────────────────────────────────
+    # ── Join parts (if requested) then set origin once ────────────────────
+    # Origin is always placed at base-front-centre:
+    #   X = 0  (rack centreline)
+    #   Y = 0  (front face of the front posts)
+    #   Z = 0  (floor / base of cabinet)
+    # For the joined mesh this is a single cursor operation after join.
+    # For the un-joined case every individual part gets the same pivot so
+    # each piece is independently importable with the correct world anchor.
     joined_obj_name = None
     if join_mesh and len(all_objs) >= 2:
         bpy.ops.object.select_all(action='DESELECT')
@@ -344,6 +418,12 @@ def create_rack_cabinet(
         joined = bpy.context.active_object
         joined.name = col_name
         joined_obj_name = joined.name
+        # One cursor operation on the finished mesh — cleanest, most reliable
+        _set_origin_to(joined, (0.0, 0.0, 0.0))
+    else:
+        # Each part gets origin at base-front-centre for consistent export
+        for obj in all_objs:
+            _set_origin_to(obj, (0.0, 0.0, 0.0))
 
     # ── Build return ───────────────────────────────────────────────────────
     final_objects = [o.name for o in col.objects]

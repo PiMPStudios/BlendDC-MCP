@@ -23,6 +23,13 @@ RACK_DEFAULT_U_HEIGHT   = 42
 RACK_DEFAULT_WIDTH_MM   = 600.0
 RACK_DEFAULT_DEPTH_MM   = 1000.0
 
+# Interior rail zone (42 × 44.45 mm = 1866.9 mm)
+RACK_INTERIOR_HEIGHT_MM = 1866.9
+RACK_INTERIOR_HEIGHT_M  = 1.8669
+
+# Relative Z positions for door hinges along the rail height (bottom → top)
+HINGE_POSITIONS = [0.10, 0.50, 0.90]
+
 # ── Structural members ─────────────────────────────────────────────────────
 # Base pedestal (cable management / levelling feet space)
 RACK_BASE_HEIGHT_MM = 60.0

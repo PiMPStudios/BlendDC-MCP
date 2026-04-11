@@ -256,11 +256,13 @@ def create_ucx_collision(
         # Compute convex hull via bmesh
         import bmesh as _bm
         bpy.ops.object.mode_set(mode='EDIT')
-        bm = _bm.from_edit_mesh(ucx_obj.data)
-        bm.verts.ensure_lookup_table()
-        _bm.ops.convex_hull(bm, input=bm.verts)
-        _bm.update_edit_mesh(ucx_obj.data)
-        bpy.ops.object.mode_set(mode='OBJECT')
+        try:
+            bm = _bm.from_edit_mesh(ucx_obj.data)
+            bm.verts.ensure_lookup_table()
+            _bm.ops.convex_hull(bm, input=bm.verts)
+            _bm.update_edit_mesh(ucx_obj.data)
+        finally:
+            bpy.ops.object.mode_set(mode='OBJECT')
 
         if simplify:
             dec = ucx_obj.modifiers.new(name="DecimateUCX", type='DECIMATE')
@@ -408,10 +410,12 @@ def validate_ue5_asset(
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
         bpy.ops.object.mode_set(mode='EDIT')
-        import bmesh as _bm
-        bm = _bm.from_edit_mesh(obj.data)
-        nm_count = sum(1 for e in bm.edges if not e.is_manifold)
-        bpy.ops.object.mode_set(mode='OBJECT')
+        try:
+            import bmesh as _bm
+            bm = _bm.from_edit_mesh(obj.data)
+            nm_count = sum(1 for e in bm.edges if not e.is_manifold)
+        finally:
+            bpy.ops.object.mode_set(mode='OBJECT')
         if nm_count > 0:
             warnings.append(f"{nm_count} non-manifold edges (may cause shading issues)")
 
