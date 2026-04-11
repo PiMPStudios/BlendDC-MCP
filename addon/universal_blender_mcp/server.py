@@ -1,8 +1,12 @@
 """
-FastMCP server with thread-safe Blender API tools.
+FastMCP tool implementations for the Universal Blender MCP server (v2.0.0).
 
 All tool functions are dispatched to Blender's main thread via bpy.app.timers
-so they are safe to call from uvicorn's worker threads.
+(thread_safe decorator) so they are safe to call from uvicorn's worker threads.
+
+Core infrastructure (mcp instance, thread_safe, logging, middleware, get_app)
+lives in core.py. New tool modules are imported at the bottom of this file for
+side-effect registration.
 """
 
 import bpy
@@ -19,288 +23,29 @@ import time as _time
 import functools
 from typing import List, Dict, Any, Tuple, Optional
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    from fastmcp import FastMCP
-
-mcp = FastMCP("blender-universal")
-
-_LOG_PREFIX = "[BlenderMCP]"
-_MAX_LOG_LEN = 400  # truncate long payloads in terminal output
-
-
-def _log(msg: str) -> None:
-    import time as _time
-    ts = _time.strftime("%H:%M:%S")
-    print(f"{_LOG_PREFIX} {ts} {msg}", flush=True)
-
-
-def _parse_sse(raw: bytes) -> list:
-    """Extract JSON objects from an SSE-formatted byte string (data: ... lines)."""
-    results = []
-    for line in raw.decode("utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if line.startswith("data:"):
-            payload = line[5:].strip()
-            if payload == "[DONE]":
-                continue
-            try:
-                results.append(json.loads(payload))
-            except json.JSONDecodeError:
-                pass
-    return results
-
-
-def _fmt_json(obj, max_len: int = _MAX_LOG_LEN) -> str:
-    s = json.dumps(obj)
-    return s if len(s) <= max_len else s[:max_len] + " …"
-
-
-def _log_rpc(direction: str, data: dict) -> None:
-    """Log a single parsed JSON-RPC object."""
-    if direction == ">>":
-        method = data.get("method", "?")
-        params = data.get("params") or {}
-        req_id = data.get("id", "–")
-        if method == "tools/call":
-            tool_name = params.get("name", "?")
-            args = params.get("arguments", {})
-            _log(f"MCP >> [{req_id}] tools/call  tool={tool_name}  args={_fmt_json(args)}")
-        elif method == "tools/list":
-            _log(f"MCP >> [{req_id}] tools/list")
-        elif method == "initialize":
-            client = (params.get("clientInfo") or {})
-            _log(f"MCP >> [{req_id}] initialize  client={client.get('name','?')} {client.get('version','')}")
-        elif method and method.startswith("notifications/"):
-            reason = params.get("reason", "")
-            cancelled_id = params.get("requestId", "")
-            _log(f"MCP >> NOTIFY  {method}  requestId={cancelled_id}  reason={reason}")
-        else:
-            _log(f"MCP >> [{req_id}] {method}  {_fmt_json(params)}")
-    else:
-        req_id = data.get("id", "–")
-        if "error" in data:
-            _log(f"MCP << [{req_id}] ERROR  {_fmt_json(data['error'])}")
-        elif "result" in data:
-            result = data["result"]
-            # Summarise tools/list specially to avoid flooding
-            if isinstance(result, dict) and "tools" in result:
-                names = [t.get("name", "?") for t in result["tools"]]
-                _log(f"MCP << [{req_id}] tools/list  ({len(names)} tools): {', '.join(names)}")
-            else:
-                _log(f"MCP << [{req_id}] result  {_fmt_json(result)}")
-        else:
-            _log(f"MCP << [{req_id}] {_fmt_json(data)}")
-
-
-def _log_body(direction: str, raw: bytes) -> None:
-    """Parse and pretty-print an MCP request/response body (JSON or SSE)."""
-    if not raw or not raw.strip():
-        return
-
-    # Try plain JSON first
-    try:
-        data = json.loads(raw)
-        _log_rpc(direction, data)
-        return
-    except json.JSONDecodeError:
-        pass
-
-    # Try SSE (event: message / data: {...} format)
-    sse_objects = _parse_sse(raw)
-    if sse_objects:
-        for obj in sse_objects:
-            _log_rpc(direction, obj)
-        return
-
-    # Fallback: show truncated raw text
-    text = raw.decode("utf-8", errors="replace").strip()
-    _log(f"MCP {direction} (unparsed): {text[:_MAX_LOG_LEN]}")
-
-
-class _StripOutputSchemaMiddleware:
-    """
-    ASGI middleware that removes 'outputSchema' from tools/list responses.
-
-    MCP spec 2025-06-18 added outputSchema, but many clients (LM Studio, etc.)
-    don't implement it and immediately cancel the session when they see it.
-    Stripping it makes the tools/list response look like 2024-11-05 format,
-    which every client understands.
-
-    Handles both plain JSON (Streamable HTTP) and SSE-framed responses.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope.get("type") != "http":
-            await self.app(scope, receive, send)
-            return
-
-        async def _send(msg):
-            if msg.get("type") == "http.response.body":
-                msg = dict(msg)
-                msg["body"] = self._strip(msg.get("body", b""))
-            await send(msg)
-
-        await self.app(scope, receive, _send)
-
-    @staticmethod
-    def _strip(chunk: bytes) -> bytes:
-        """Remove outputSchema from a tools/list response (plain JSON or SSE)."""
-        if b"outputSchema" not in chunk:
-            return chunk
-
-        # Try plain JSON first (Streamable HTTP)
-        try:
-            data = json.loads(chunk)
-            tools = (data.get("result") or {}).get("tools")
-            if isinstance(tools, list):
-                for tool in tools:
-                    tool.pop("outputSchema", None)
-            return json.dumps(data).encode("utf-8")
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-        # Fall back to SSE line-by-line parsing
-        lines = []
-        for line in chunk.decode("utf-8", errors="replace").splitlines(keepends=True):
-            stripped = line.strip()
-            if stripped.startswith("data:"):
-                payload = stripped[5:].strip()
-                try:
-                    data = json.loads(payload)
-                    result = (data.get("result") or {})
-                    tools = result.get("tools")
-                    if isinstance(tools, list):
-                        for tool in tools:
-                            tool.pop("outputSchema", None)
-                        line = f"data: {json.dumps(data)}\n"
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-            lines.append(line)
-        return "".join(lines).encode("utf-8")
-
-
-class _MCPDebugMiddleware:
-    """
-    ASGI middleware that logs MCP JSON-RPC request/response bodies in real time.
-
-    Requests are logged when fully received.
-    Responses are logged per-chunk so SSE events show their actual send timestamp,
-    not the timestamp when the connection eventually closes.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope.get("type") != "http":
-            await self.app(scope, receive, send)
-            return
-
-        # ── buffer request body (requests arrive in one shot) ────────────
-        req_chunks: list[bytes] = []
-
-        async def _receive():
-            msg = await receive()
-            if msg.get("type") == "http.request":
-                req_chunks.append(msg.get("body", b""))
-                if not msg.get("more_body", False):
-                    _log_body(">>", b"".join(req_chunks))
-            return msg
-
-        # ── log each response chunk immediately ──────────────────────────
-        # Logging per-chunk gives accurate timestamps for when data actually
-        # leaves the server.
-        async def _send(msg):
-            if msg.get("type") == "http.response.body":
-                chunk = msg.get("body", b"")
-                if chunk and chunk.strip():
-                    _log_body("<<", chunk)
-            await send(msg)
-
-        await self.app(scope, _receive, _send)
-
-
-# ── Thread safety ──────────────────────────────────────────────────────────
-
-def thread_safe(func):
-    """Run a function on Blender's main thread and return its result."""
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        arg_summary = ", ".join(
-            [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
-        )
-        _log(f"TOOL >> {func.__name__}({arg_summary})")
-
-        if threading.current_thread() is threading.main_thread():
-            try:
-                result = func(*args, **kwargs)
-                _log(f"TOOL << {func.__name__} OK: {result!r}")
-                return result
-            except Exception as exc:
-                _log(f"TOOL << {func.__name__} ERROR: {exc}")
-                raise
-
-        result = [None]
-        error = [None]
-        done = threading.Event()
-
-        def _run():
-            try:
-                result[0] = func(*args, **kwargs)
-            except Exception as exc:
-                error[0] = exc
-            finally:
-                done.set()
-
-        bpy.app.timers.register(_run, first_interval=0.0)
-
-        if not done.wait(timeout=10.0):
-            _log(f"TOOL << {func.__name__} TIMEOUT")
-            raise TimeoutError(f"Blender main thread timeout in {func.__name__}")
-
-        if error[0] is not None:
-            _log(f"TOOL << {func.__name__} ERROR: {error[0]}")
-            raise error[0]
-
-        _log(f"TOOL << {func.__name__} OK: {result[0]!r}")
-        return result[0]
-    return wrapper
-
-
-def get_app():
-    """
-    Return the FastMCP ASGI application with compatibility fixes and debug logging.
-
-    Stack (outermost → innermost):
-      _MCPDebugMiddleware          – real-time request/response logging
-      _StripOutputSchemaMiddleware – removes outputSchema from tools/list
-      mcp.streamable_http_app()    – Streamable HTTP transport (POST /mcp)
-
-    Falls back through http_app(stateless_http=True) → sse_app() for older
-    mcp package versions.
-    """
-    if hasattr(mcp, "streamable_http_app"):
-        transport = mcp.streamable_http_app()
-    elif hasattr(mcp, "http_app"):
-        transport = mcp.http_app(stateless_http=True)
-    else:
-        _log("WARNING: falling back to SSE transport (mcp package is outdated)")
-        transport = mcp.sse_app()
-    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(transport))
+from core import mcp, thread_safe, _log, get_app  # noqa: F401
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 @thread_safe
-def list_objects() -> List[str]:
-    """Return the names of all objects in the current scene."""
-    return [obj.name for obj in bpy.data.objects]
+def list_objects(limit: int = 200) -> Dict[str, Any]:
+    """
+    Return the names of all objects in the current scene.
+
+    limit: maximum number of object names to return (default 200).
+           Capped to prevent context window overflow on large scenes.
+    """
+    all_names = [obj.name for obj in bpy.data.objects]
+    total = len(all_names)
+    truncated = total > limit
+    return {
+        "objects":   all_names[:limit],
+        "count":     min(total, limit),
+        "total":     total,
+        "truncated": truncated,
+    }
 
 
 @mcp.tool()
@@ -623,22 +368,6 @@ def save_file(filepath: str = "") -> str:
         return f"Saved to '{filepath}'"
     bpy.ops.wm.save_mainfile()
     return f"Saved '{bpy.data.filepath}'"
-
-
-@mcp.tool()
-@thread_safe
-def execute_python(code: str) -> str:
-    """
-    Execute arbitrary Python code in Blender's environment and return stdout.
-
-    Use with care — this has full access to the Blender API.
-    """
-    import io
-    import contextlib
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        exec(code, {"bpy": bpy, "sys": sys})  # noqa: S102
-    return buf.getvalue() or "OK"
 
 
 # ── Selection & organisation ───────────────────────────────────────────────
@@ -1863,3 +1592,12 @@ def edit_mesh(
         bpy.ops.object.mode_set(mode='OBJECT')
 
     return {"object": object_name, "operation": op_lower, "params": effective_params}
+
+
+# ── Register additional tool modules (side-effect registration) ────────────
+# Each import causes @mcp.tool() decorators to run, registering tools on the
+# shared `mcp` instance from core.py.
+import rack_tools    # noqa: F401, E402  — 14 rack cabinet tools
+import mesh_tools    # noqa: F401, E402  — 11 hard-surface mesh tools
+import gn_tools      # noqa: F401, E402  — 6 Geometry Nodes management tools
+import export_tools  # noqa: F401, E402  — 6 UE5 export pipeline tools
