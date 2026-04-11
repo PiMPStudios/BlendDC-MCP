@@ -1008,8 +1008,8 @@ def duplicate_rack(
 
 
 # ── Tool 12: create_rack_row ──────────────────────────────────────────────
+# NOTE: MCP registration lives in bay_tools.py — this is a local helper.
 
-@mcp.tool()
 @thread_safe
 def create_rack_row(
     row_name: str = "RackRow",
@@ -1657,8 +1657,8 @@ def add_door_vent_pattern(
 
 
 # ── Tool 22: add_brush_strip ──────────────────────────────────────────────
+# NOTE: MCP registration lives in cable_tools.py — this is a local helper.
 
-@mcp.tool()
 @thread_safe
 def add_brush_strip(
     collection_name: str,
@@ -1730,8 +1730,8 @@ def add_brush_strip(
 
 
 # ── Tool 23: add_cable_entry_panel ────────────────────────────────────────
+# NOTE: MCP registration lives in cable_tools.py — this is a local helper.
 
-@mcp.tool()
 @thread_safe
 def add_cable_entry_panel(
     collection_name: str,
@@ -1902,8 +1902,8 @@ def add_top_cable_tray(
 
 
 # ── Tool 25: add_vertical_cable_manager ───────────────────────────────────
+# NOTE: MCP registration lives in cable_tools.py — this is a local helper.
 
-@mcp.tool()
 @thread_safe
 def add_vertical_cable_manager(
     collection_name: str,
