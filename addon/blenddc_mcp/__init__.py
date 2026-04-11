@@ -100,13 +100,21 @@ def _ensure_dependencies() -> bool:
 def _get_server_app():
     """Import the bundled server module, pre-warm schema cache, and return the ASGI app."""
     addon_dir = str(Path(__file__).parent)
+    # Insert at position 0 so the addon's bare module names always win over
+    # any same-named system modules (e.g. 'core', 'constants', 'server').
     if addon_dir not in sys.path:
+        sys.path.insert(0, addon_dir)
+    else:
+        # Move to front if it slipped back during a previous reload
+        sys.path.remove(addon_dir)
         sys.path.insert(0, addon_dir)
 
     import importlib
 
-    # Reload modules in dependency order so each picks up fresh code:
-    # constants → core → tool modules → server (core before tool modules is critical)
+    # Reload modules in dependency order so each picks up fresh code.
+    # CRITICAL: core must reload FIRST — it creates the shared FastMCP instance.
+    # All tool modules must reload AFTER core so their @mcp.tool() decorators
+    # register onto the fresh mcp instance, not a stale one from a prior reload.
     for _mod_name in (
         "constants",
         "core",

@@ -256,13 +256,67 @@ def thread_safe(func):
     return wrapper
 
 
+# ── ASGI app + direct tool proxy ──────────────────────────────────────────
+
+class _AppProxy:
+    """
+    Wraps the full ASGI middleware stack so uvicorn can call it normally,
+    but also exposes every registered MCP tool as a direct Python callable.
+
+    This lets you use either interface:
+
+      # Via HTTP (normal MCP client usage):
+      uvicorn.run(get_app(), host="127.0.0.1", port=8400)
+
+      # Direct call from Blender Python Console:
+      from blenddc_mcp.core import get_app
+      app = get_app()
+      result = app.create_rack_cabinet(name="TestRack", u_height=42)
+    """
+
+    def __init__(self, asgi_app):
+        object.__setattr__(self, "_asgi", asgi_app)
+
+    async def __call__(self, scope, receive, send):
+        await object.__getattribute__(self, "_asgi")(scope, receive, send)
+
+    def __getattr__(self, name: str):
+        """Look up a registered MCP tool by name and return it as a callable."""
+        tm = getattr(mcp, "_tool_manager", None)
+        if tm is not None:
+            tools = getattr(tm, "_tools", {})
+            if name in tools:
+                tool_obj = tools[name]
+                fn = getattr(tool_obj, "fn", None) or getattr(tool_obj, "run", None)
+                if fn is not None:
+                    return fn
+        available = sorted(
+            getattr(getattr(mcp, "_tool_manager", None), "_tools", {}).keys()
+        )
+        raise AttributeError(
+            f"No MCP tool named '{name}'. "
+            f"Registered tools ({len(available)}): {available[:8]}{'…' if len(available) > 8 else ''}"
+        )
+
+
 # ── ASGI app factory ───────────────────────────────────────────────────────
 
-def get_app():
-    """
-    Return the FastMCP ASGI application with compatibility fixes and debug logging.
+def get_mcp() -> "FastMCP":
+    """Return the raw FastMCP instance (tools registered, no ASGI wrapping)."""
+    return mcp
 
-    Stack (outermost → innermost):
+
+def get_app() -> _AppProxy:
+    """
+    Return the MCP ASGI application wrapped in an _AppProxy.
+
+    The proxy is both an ASGI callable (for uvicorn) and a tool dispatcher:
+
+      app = get_app()
+      result = app.create_rack_cabinet(name="TestRack", u_height=42)
+
+    ASGI middleware stack (outermost → innermost):
+      _AppProxy                    – direct tool access + ASGI delegation
       _MCPDebugMiddleware          – real-time request/response logging
       _StripOutputSchemaMiddleware – removes outputSchema from tools/list
       mcp.streamable_http_app()    – Streamable HTTP transport (POST /mcp)
@@ -274,4 +328,4 @@ def get_app():
     else:
         _log("WARNING: falling back to SSE transport (mcp package is outdated)")
         transport = mcp.sse_app()
-    return _MCPDebugMiddleware(_StripOutputSchemaMiddleware(transport))
+    return _AppProxy(_MCPDebugMiddleware(_StripOutputSchemaMiddleware(transport)))
