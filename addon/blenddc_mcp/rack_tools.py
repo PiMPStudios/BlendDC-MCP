@@ -435,9 +435,15 @@ def create_rack_cabinet(
         tmp_meshes: List[bpy.types.Mesh] = []
 
         for part in all_objs:
-            # Copy mesh data and bake world transform into vertex positions
+            # Copy mesh data and bake world transform into vertex positions.
+            # Use Matrix.Translation(part.location) rather than part.matrix_world
+            # because matrix_world is only updated by the depsgraph evaluator —
+            # freshly created objects (no depsgraph pass yet) have identity
+            # matrix_world, which collapses all parts to the origin and produces
+            # the cross/plus shape bug. All parts are pure translations (no
+            # rotation or scale), so Translation(location) IS the correct matrix.
             tmp = part.data.copy()
-            tmp.transform(part.matrix_world)
+            tmp.transform(mathutils.Matrix.Translation(part.location))
             combined_bm.from_mesh(tmp)   # BMesh.from_mesh APPENDS geometry
             tmp_meshes.append(tmp)
 
