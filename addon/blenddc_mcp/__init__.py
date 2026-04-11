@@ -135,8 +135,10 @@ def _get_server_app():
         if _mod_name in sys.modules:
             importlib.reload(sys.modules[_mod_name])
 
+    _server_was_loaded = "server" in sys.modules
     import server as _srv
-    importlib.reload(_srv)
+    if _server_was_loaded:
+        importlib.reload(_srv)
     app = _srv.get_app()
 
     # Pre-warm Pydantic schema generation for all tools synchronously.
