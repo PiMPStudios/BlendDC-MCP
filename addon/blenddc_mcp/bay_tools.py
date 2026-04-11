@@ -52,7 +52,7 @@ def _create_box_object(
     obj  = bpy.data.objects.new(name, mesh)
     bm   = bmesh.new()
     scale = mathutils.Matrix.Diagonal((w * 0.5, d * 0.5, h * 0.5, 1.0))
-    bmesh.ops.create_box(bm, size=1.0, matrix=scale)
+    bmesh.ops.create_cube(bm, size=1.0, matrix=scale)
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()
@@ -148,7 +148,7 @@ def create_rack_row(
         x_m       = start_x_m + i * step_m
 
         _rt.create_rack_cabinet(
-            collection_name=rack_name,
+            name=rack_name,
             u_height=u_height,
             width_mm=width_mm,
             depth_mm=depth_mm,

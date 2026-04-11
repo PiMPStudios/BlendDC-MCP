@@ -84,7 +84,7 @@ def _create_box_object(
     obj  = bpy.data.objects.new(name, mesh)
     bm   = bmesh.new()
     scale = mathutils.Matrix.Diagonal((w * 0.5, d * 0.5, h * 0.5, 1.0))
-    bmesh.ops.create_box(bm, size=1.0, matrix=scale)
+    bmesh.ops.create_cube(bm, size=1.0, matrix=scale)
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()

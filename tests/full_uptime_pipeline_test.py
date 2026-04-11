@@ -528,14 +528,14 @@ def phase_facility_creation(
     #     All downstream tests derive rack names from these.
     try:
         result = mcp.call_tool("get_section_bays", {"section_name": SECTION})
-        # Result shape: {"bays": [{"name": ..., "x_m": ..., "y_m": ...}, ...]}
+        # Result shape: {"bays": [{"bay": ..., "start_x_m": ..., ...}, ...]}
         if isinstance(result, dict) and "bays" in result:
             bays = [
-                b["name"] if isinstance(b, dict) else b
+                b.get("bay") or b.get("name") or b if isinstance(b, dict) else b
                 for b in result["bays"]
             ]
         elif isinstance(result, list):
-            bays = [b["name"] if isinstance(b, dict) else b for b in result]
+            bays = [b.get("bay") or b.get("name") or b if isinstance(b, dict) else b for b in result]
         else:
             bays = []
 
