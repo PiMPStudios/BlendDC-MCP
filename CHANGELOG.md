@@ -30,7 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 **Quality of Life**
 - `validate_entire_scene` — single call runs `validate_facility` per section, `validate_cable_routing` scene-wide, and orphaned rack check
 - `suggest_next_step` — inspects actual scene state and returns up to 8 prioritised, pre-filled tool call recommendations
-- `list_all_tools` — all 198 registered tools grouped by module with one-line descriptions; supports module and keyword filtering
+- `list_all_tools` — all 189 registered tools grouped by module with one-line descriptions; supports module and keyword filtering
 - `export_tool_reference` — generates a full Markdown or JSON tool reference from live docstrings and parameter schemas
 
 ### Changed

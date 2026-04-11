@@ -2,7 +2,7 @@
 
 ### Datacenter Asset Factory for UPTIME
 
-**198 production-ready tools for building photorealistic datacenter environments in Blender — driven by any MCP-compatible AI frontend.**
+**189 production-ready tools for building photorealistic datacenter environments in Blender — driven by any MCP-compatible AI frontend.**
 
 BlendDC-MCP is a Blender addon that starts a lightweight MCP server inside Blender's Python process. Connect Claude, Cursor, LM Studio, or any MCP client, then describe what you want to build — racks, bays, cables, variation, failure states, full facility sections — and get production-ready UE5 assets back.
 
@@ -18,7 +18,7 @@ AI Frontend  ──HTTP──▶  BlendDC-MCP Server (inside Blender)  ──bpy
 
 ## What It Does
 
-BlendDC-MCP gives an AI 198 tools spanning the complete datacenter asset pipeline — from a single EIA-310 rack cabinet to a fully dressed multi-bay facility section ready for UE5 import.
+BlendDC-MCP gives an AI 189 tools spanning the complete datacenter asset pipeline — from a single EIA-310 rack cabinet to a fully dressed multi-bay facility section ready for UE5 import.
 
 ### The Full Pipeline
 
@@ -33,7 +33,7 @@ create_facility_section          ← lay out a grid of bays
                                 └─ export_facility_layout_json  ← UE5 manifest + FBX
 ```
 
-### 198 Tools Across 12 Modules
+### 189 Tools Across 12 Modules
 
 | Module | Tools | What It Builds |
 |---|---:|---|
@@ -135,7 +135,7 @@ Then install the zip as above.
 3. The System Console confirms:
 
 ```
-[BlendDC-MCP] Schema cache ready — 198 tools in 1.2s
+[BlendDC-MCP] Schema cache ready — 189 tools in 0.01s
 [BlendDC-MCP] Server running — http://127.0.0.1:8400/mcp
 ```
 
@@ -210,7 +210,7 @@ BlendDC-MCP/
 │   ├── uptime_pipeline_test.py       # In-Blender test (Scripting workspace)
 │   └── full_uptime_pipeline_test.py  # External integration test (v3.0.0)
 ├── docs/
-│   └── tool_reference.md          # Full 198-tool reference (auto-generated)
+│   └── tool_reference.md          # Full 189-tool reference (auto-generated)
 ├── build_addon.py
 ├── CHANGELOG.md
 └── README.md
@@ -232,7 +232,7 @@ BlendDC-MCP/
 
 ## Generating the Tool Reference
 
-The full 198-tool reference with parameter tables is auto-generated from live docstrings. Start the server and ask your AI:
+The full 189-tool reference with parameter tables is auto-generated from live docstrings. Start the server and ask your AI:
 
 ```python
 export_tool_reference(

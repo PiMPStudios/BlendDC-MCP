@@ -13,11 +13,11 @@
 >
 > What follows is the structure + the `polish_tools` module in full detail.
 > All other modules list their tools; run `export_tool_reference` for
-> complete parameter tables on all 198 tools.
+> complete parameter tables on all 189 tools.
 
 ---
 
-**v3.0.0  ·  198 tools  ·  12 modules**
+**v3.0.0  ·  189 tools  ·  12 modules**
 
 ---
 
@@ -365,4 +365,4 @@ Write a complete tool reference document to disk, generated from live docstrings
 
 ---
 
-*To regenerate this document with full parameter tables for all 198 tools, run `export_tool_reference` with `output_path` pointing here.*
+*To regenerate this document with full parameter tables for all 189 tools, run `export_tool_reference` with `output_path` pointing here.*

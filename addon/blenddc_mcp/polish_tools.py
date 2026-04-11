@@ -19,7 +19,7 @@ Phase 9 (v3.0.0) — Production readiness layer built on top of the 186-tool cor
   Quality of Life:
     validate_entire_scene    — one-call health check across all facility sections + cables
     suggest_next_step        — scene-aware prioritised action recommendations with pre-filled args
-    list_all_tools           — all 198 tools grouped by module with one-line descriptions
+    list_all_tools           — all 189 tools grouped by module with one-line descriptions
     export_tool_reference    — generate Markdown or JSON tool reference document from live docstrings
 
 Design rules:
