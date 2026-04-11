@@ -1019,7 +1019,11 @@ def export_rack_collection_ue5(
                 lod1_ratio=lod1_ratio,
                 lod2_ratio=lod2_ratio,
             )
-            cleanup_lod_meshes(base_name=base, keep_lod0=False)
+            cleanup_lod_meshes(base_name=base, keep_lod0=True)
+            # Rename _LOD0 back to original name so the source object is preserved
+            lod0_obj = bpy.data.objects.get(f"{base}_LOD0")
+            if lod0_obj:
+                lod0_obj.name = base
             lod_results = lod_export
             report["steps"].append({"step": "lods", "exported": lod_export["exported"]})
 
