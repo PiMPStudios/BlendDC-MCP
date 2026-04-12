@@ -263,18 +263,31 @@ def _create_raised_floor(
             name = f"{zone_name}_tile_{ix}_{iy}"
 
             if tile_type == 'perforated':
-                # Perforated tile: four border strips joined into one object
-                strips: List[bpy.types.Object] = []
-                def _strip(sname, scx, scy, sw, sd):
-                    o = _create_box_object(sname, cx=scx, cy=scy, cz=tile_cz,
-                                           w=sw, d=sd, h=RF_TILE_H_M,
+                # Perforated tile: waffle grid of bars matching Tate PERF 1250 spec.
+                # 15 mm bars / 15 mm gaps → 30 mm pitch → 25 % open area.
+                # X-running bars + Y-running bars create a square-hole grid pattern.
+                perf_bar  = 0.015
+                perf_gap  = 0.015
+                perf_pitch = perf_bar + perf_gap
+                n_pb = int(tw / perf_pitch)
+                p_off = (tw - n_pb * perf_pitch) / 2   # centre grid in tile
+
+                bars: List[bpy.types.Object] = []
+                def _bar(bname, bcx, bcy, bw, bd):
+                    o = _create_box_object(bname, cx=bcx, cy=bcy, cz=tile_cz,
+                                           w=bw, d=bd, h=RF_TILE_H_M,
                                            collection=tiles_col)
-                    strips.append(o)
-                _strip(f"{name}_N", tcx,                  tcy + (td - fw) / 2, tw,          fw)
-                _strip(f"{name}_S", tcx,                  tcy - (td - fw) / 2, tw,          fw)
-                _strip(f"{name}_E", tcx + (tw - fw) / 2,  tcy,                 fw, td - 2*fw)
-                _strip(f"{name}_W", tcx - (tw - fw) / 2,  tcy,                 fw, td - 2*fw)
-                _join_zone(name, strips, tiles_col)
+                    bars.append(o)
+
+                for i in range(n_pb):
+                    # X-running bar (spans full tile width, offset in Y)
+                    by = tcy - tw/2 + p_off + perf_bar/2 + i * perf_pitch
+                    _bar(f"{name}_xb{i}", tcx, by, tw, perf_bar)
+                    # Y-running bar (spans full tile depth, offset in X)
+                    bx = tcx - td/2 + p_off + perf_bar/2 + i * perf_pitch
+                    _bar(f"{name}_yb{i}", bx, tcy, perf_bar, td)
+
+                _join_zone(name, bars, tiles_col)
             else:
                 _create_box_object(name, cx=tcx, cy=tcy, cz=tile_cz,
                                    w=tw, d=td, h=RF_TILE_H_M,
