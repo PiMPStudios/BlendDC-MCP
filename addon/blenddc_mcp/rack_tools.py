@@ -46,6 +46,12 @@ from constants import (
     CABLE_ENTRY_CUTOUT_W_M, CABLE_ENTRY_CUTOUT_H_M,
     CABLE_TRAY_DEPTH_M, CABLE_TRAY_WALL_THICK_M,
     VERT_CABLE_MGMT_WIDTH_M,
+    FAN_TRAY_HEIGHT_M, FAN_TRAY_PANEL_H_M,
+    FAN_SIZE_M, FAN_FRAME_WALL_M, FAN_GRID_COLS, FAN_GRID_ROWS,
+    VENT_BAR_W_M, VENT_SLOT_GAP_M,
+    FLOOR_BRACKET_VERT_H_M, FLOOR_BRACKET_VERT_W_M, FLOOR_BRACKET_VERT_T_M,
+    FLOOR_BRACKET_FLANGE_L_M, FLOOR_BRACKET_FLANGE_T_M,
+    RACK_CROSSBAR_H_M, RACK_CROSSBAR_T_M,
 )
 
 
@@ -182,22 +188,31 @@ def _add_door_hardware(
     base_h: float,
     rail_h: float,
     collection: bpy.types.Collection,
+    face: str = "front",
+    depth: float = 0.0,
 ) -> List[bpy.types.Object]:
     """
-    Add hinge-pin stubs (left side) and latch receiver (right side) on the front face.
+    Add hinge-pin stubs (left side) and latch receiver (right side) on the
+    specified face. face='front' protrudes at Y=0; face='rear' protrudes at Y=depth.
     Returns the list of hardware objects created.
     """
     objs: List[bpy.types.Object] = []
+    tag = "rear" if face == "rear" else "front"
 
-    # ── Hinge pins (left front, 3 per door) ──────────────────────────────
-    hinge_z_positions = [
-        base_h + rail_h * pos for pos in HINGE_POSITIONS
-    ]
+    if face == "rear":
+        hinge_cy = depth + HINGE_PIN_HEIGHT_M / 2   # protrudes past rear face
+        latch_cy  = depth + LATCH_DEPTH_M / 2
+    else:
+        hinge_cy = -(HINGE_PIN_HEIGHT_M / 2)         # protrudes forward of Y=0
+        latch_cy  = -(LATCH_DEPTH_M / 2)
+
+    # ── Hinge pins (left side, 3 per door) ───────────────────────────────
+    hinge_z_positions = [base_h + rail_h * pos for pos in HINGE_POSITIONS]
     for i, hz in enumerate(hinge_z_positions):
         hinge = _create_box_object(
-            f"{name_prefix}_hinge_{i}",
+            f"{name_prefix}_hinge_{tag}_{i}",
             cx=-(w / 2) + ANCHOR_INSET_M,
-            cy=-(HINGE_PIN_HEIGHT_M / 2),      # protrudes forward of Y=0
+            cy=hinge_cy,
             cz=hz,
             w=HINGE_PIN_DIAM_M,
             d=HINGE_PIN_HEIGHT_M,
@@ -206,11 +221,11 @@ def _add_door_hardware(
         )
         objs.append(hinge)
 
-    # ── Latch receiver (right front, centre height) ───────────────────────
+    # ── Latch receiver (right side, centre height) ────────────────────────
     latch = _create_box_object(
-        f"{name_prefix}_latch",
+        f"{name_prefix}_latch_{tag}",
         cx=(w / 2) - ANCHOR_INSET_M,
-        cy=-(LATCH_DEPTH_M / 2),               # protrudes forward of Y=0
+        cy=latch_cy,
         cz=base_h + rail_h * 0.50,
         w=LATCH_WIDTH_M,
         d=LATCH_DEPTH_M,
@@ -220,6 +235,152 @@ def _add_door_hardware(
     objs.append(latch)
 
     return objs
+
+
+# ── Floor bracket helper ──────────────────────────────────────────────────
+
+def _create_floor_bracket(
+    name_prefix: str,
+    post_cx: float,
+    post_cy: float,
+    corner_tag: str,
+    collection: bpy.types.Collection,
+) -> List[bpy.types.Object]:
+    """
+    Create a seismic floor-mounting L-bracket at one rack corner post.
+
+    Represents a standard steel angle bracket: a vertical plate bolted to the
+    outer face of the corner post, plus a horizontal floor flange that sits on
+    the raised floor tile and accepts anchor bolts.
+
+    corner_tag: "FL"|"FR"|"RL"|"RR" (Front-Left / Front-Right / Rear-Left / Rear-Right)
+    post_cx, post_cy: world XY centre of the post this bracket attaches to
+    """
+    objs: List[bpy.types.Object] = []
+
+    sign_x = -1 if corner_tag.endswith("L") else +1
+    post_half = RACK_POST_SIZE_M / 2
+
+    # Vertical plate — sits flush against the outer X face of the post,
+    # runs 40 mm along Y (spanning post face width), 80 mm tall
+    vert = _create_box_object(
+        f"{name_prefix}_vert",
+        cx=post_cx + sign_x * (post_half + FLOOR_BRACKET_VERT_T_M / 2),
+        cy=post_cy,
+        cz=FLOOR_BRACKET_VERT_H_M / 2,
+        w=FLOOR_BRACKET_VERT_T_M,
+        d=FLOOR_BRACKET_VERT_W_M,
+        h=FLOOR_BRACKET_VERT_H_M,
+        collection=collection,
+    )
+    objs.append(vert)
+
+    # Horizontal floor flange — extends outward in X from the post corner,
+    # lies flat on the floor, accepts anchor bolts
+    flange = _create_box_object(
+        f"{name_prefix}_flange",
+        cx=post_cx + sign_x * (post_half + FLOOR_BRACKET_FLANGE_L_M / 2),
+        cy=post_cy,
+        cz=FLOOR_BRACKET_FLANGE_T_M / 2,
+        w=FLOOR_BRACKET_FLANGE_L_M,
+        d=FLOOR_BRACKET_VERT_W_M,
+        h=FLOOR_BRACKET_FLANGE_T_M,
+        collection=collection,
+    )
+    objs.append(flange)
+
+    return objs
+
+
+# ── Fan tray helper ────────────────────────────────────────────────────────
+
+def _fan_zone_bounds(w: float, d: float):
+    """Return (fz_w, fz_d, fz_x0, fz_x1, fz_y0, fz_y1) for the 2×2 fan zone."""
+    fz_w = FAN_GRID_COLS * FAN_SIZE_M + (FAN_GRID_COLS - 1) * FAN_FRAME_WALL_M
+    fz_d = FAN_GRID_ROWS * FAN_SIZE_M + (FAN_GRID_ROWS - 1) * FAN_FRAME_WALL_M
+    fz_x0 = -fz_w / 2
+    fz_x1 =  fz_w / 2
+    fz_y0 = d / 2 - fz_d / 2
+    fz_y1 = d / 2 + fz_d / 2
+    return fz_w, fz_d, fz_x0, fz_x1, fz_y0, fz_y1
+
+
+def _create_zoned_vent_plate(
+    name_prefix: str,
+    w: float,
+    d: float,
+    cz: float,
+    h: float,
+    collection: bpy.types.Collection,
+) -> List[bpy.types.Object]:
+    """
+    Build a horizontal plate that is solid everywhere except the 2×2 fan zone,
+    where it has ventilation slots (bars running full fan-zone width, gaps in Y).
+
+    Solid sections: left strip, right strip, front centre piece, rear centre piece.
+    Slotted section: bars spanning the fan zone width with open gaps between them.
+    """
+    objs: List[bpy.types.Object] = []
+    fz_w, fz_d, fz_x0, fz_x1, fz_y0, fz_y1 = _fan_zone_bounds(w, d)
+
+    # Left solid strip (full depth)
+    left_w = w / 2 + fz_x0
+    objs.append(_create_box_object(f"{name_prefix}_solid_L",
+        cx=(fz_x0 - w / 2) / 2, cy=d / 2, cz=cz,
+        w=left_w, d=d, h=h, collection=collection))
+
+    # Right solid strip (full depth)
+    right_w = w / 2 - fz_x1
+    objs.append(_create_box_object(f"{name_prefix}_solid_R",
+        cx=(fz_x1 + w / 2) / 2, cy=d / 2, cz=cz,
+        w=right_w, d=d, h=h, collection=collection))
+
+    # Front solid piece (fan zone X width, rack front to fan zone front)
+    if fz_y0 > 0:
+        objs.append(_create_box_object(f"{name_prefix}_solid_F",
+            cx=0.0, cy=fz_y0 / 2, cz=cz,
+            w=fz_w, d=fz_y0, h=h, collection=collection))
+
+    # Rear solid piece (fan zone X width, fan zone rear to rack rear)
+    rear_d = d - fz_y1
+    if rear_d > 0:
+        objs.append(_create_box_object(f"{name_prefix}_solid_Rr",
+            cx=0.0, cy=(fz_y1 + d) / 2, cz=cz,
+            w=fz_w, d=rear_d, h=h, collection=collection))
+
+    # Slotted bars within fan zone (bars span fz_w, gaps in Y)
+    # Array is centred in the fan zone so margins are equal at front and rear.
+    pitch = VENT_BAR_W_M + VENT_SLOT_GAP_M
+    n_bars = max(1, int(fz_d / pitch))
+    total_span = n_bars * VENT_BAR_W_M + (n_bars - 1) * VENT_SLOT_GAP_M
+    offset = (fz_d - total_span) / 2   # equal margin each side
+    for i in range(n_bars):
+        bar_cy = fz_y0 + offset + VENT_BAR_W_M / 2 + i * pitch
+        objs.append(_create_box_object(f"{name_prefix}_slot_{i:02d}",
+            cx=0.0, cy=bar_cy, cz=cz,
+            w=fz_w, d=VENT_BAR_W_M, h=h, collection=collection))
+
+    return objs
+
+
+def _create_fan_tray(
+    name_prefix: str,
+    w: float,
+    d: float,
+    z_base: float,
+    collection: bpy.types.Collection,
+) -> List[bpy.types.Object]:
+    """
+    Create a 1U fan tray plate at the base of the top cap zone.
+    Solid everywhere except the 2×2 fan zone, which has intake slots.
+    """
+    return _create_zoned_vent_plate(
+        name_prefix=f"{name_prefix}_fan_tray",
+        w=w, d=d,
+        cz=z_base + FAN_TRAY_PANEL_H_M / 2,
+        h=FAN_TRAY_PANEL_H_M,
+        collection=collection,
+    )
 
 
 # ── Tool 1: create_rack_cabinet ────────────────────────────────────────────
@@ -237,6 +398,9 @@ def create_rack_cabinet(
     include_top_panel: bool = True,
     include_base: bool = True,
     include_door_mounts: bool = True,
+    include_fan_tray: bool = True,
+    include_crossbars: bool = True,
+    include_rear_panel: bool = False,
     join_mesh: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -244,8 +408,12 @@ def create_rack_cabinet(
 
     Produces accurate EIA-310 geometry: 42U interior = 1866.9 mm, 19" rail span
     (482.6 mm inner face to inner face), 4 structural corner posts with continuous
-    L-bracket mounting rails, sheet-metal side/top/rear panels, and door hardware
-    mounting points.
+    L-bracket mounting rails, sheet-metal side/top panels, door hardware mounting
+    points, floor-anchor L-brackets, structural crossbars, and a 1U exhaust fan
+    tray with 2×2 fan grid in the top cap section.
+
+    Front and rear are open by default (no door panels). Use create_rack_doors or
+    add doors individually when needed.
 
     Origin is placed at base-front-centre:
       X = rack centreline, Y = front face (0), Z = floor (0)
@@ -258,8 +426,11 @@ def create_rack_cabinet(
     sheet_thickness_mm: Panel sheet metal thickness in mm (default 1.5)
     include_side_panels: Add left/right side panels
     include_top_panel:   Add top cap panel
-    include_base:        Add base/plinth
-    include_door_mounts: Add hinge pin stubs and latch receiver on front face
+    include_base:        Add floor-mounting L-brackets at each corner post
+    include_door_mounts: Add hinge pin stubs and latch receivers on front and rear faces
+    include_fan_tray:    Add 1U exhaust fan tray (2×2 fans) at top of rail zone
+    include_crossbars:   Add structural horizontal crossbars at rear posts
+    include_rear_panel:  Add solid rear panel (default False — rear is open)
     join_mesh:           Join all parts into a single mesh object (default True)
 
     Returns collection name, object list, key sockets, rack dimensions, and origin.
@@ -313,19 +484,32 @@ def create_rack_cabinet(
     col["rack_top_height_m"]   = th
     col["rack_total_height_m"] = tot
     col["rack_half_span_m"]    = half_span
+    col["rack_has_fan_tray"]   = include_fan_tray
+    col["rack_has_crossbars"]  = include_crossbars
     col["is_rack_cabinet"]     = True
 
     all_objs: List[bpy.types.Object] = []
 
-    # ── Base ───────────────────────────────────────────────────────────────
+    # ── Floor-mounting L-brackets (replaces simple base box) ──────────────
+    # Four seismic anchor brackets — one at each corner post.
+    # Vertical plate bolted to post outer face; horizontal flange on floor.
+    # No casters or levelling feet — rack is bolted directly to raised floor.
     if include_base:
-        base = _create_box_object(
-            f"{col_name}_base",
-            cx=0.0, cy=d / 2, cz=bh / 2,
-            w=w, d=d, h=bh,
-            collection=col,
-        )
-        all_objs.append(base)
+        bracket_configs = [
+            ("FL", -post_cx, post_cy_f),
+            ("FR",  post_cx, post_cy_f),
+            ("RL", -post_cx, post_cy_r),
+            ("RR",  post_cx, post_cy_r),
+        ]
+        for tag, bcx, bcy in bracket_configs:
+            bracket_parts = _create_floor_bracket(
+                name_prefix=f"{col_name}_bracket_{tag}",
+                post_cx=bcx,
+                post_cy=bcy,
+                corner_tag=tag,
+                collection=col,
+            )
+            all_objs.extend(bracket_parts)
 
     # ── 4 corner posts ─────────────────────────────────────────────────────
     post_configs = [
@@ -372,6 +556,23 @@ def create_rack_cabinet(
         )
         all_objs.extend(parts)
 
+    # ── Structural crossbars ───────────────────────────────────────────────
+    # Two horizontal bars connecting left/right rear posts at 1/3 and 2/3 height.
+    # Placed at rear (hidden behind rear panel) for structural rigidity.
+    if include_crossbars:
+        for frac, tag in ((1.0 / 3.0, "lower"), (2.0 / 3.0, "upper")):
+            cbar = _create_box_object(
+                f"{col_name}_crossbar_{tag}",
+                cx=0.0,
+                cy=post_cy_r,
+                cz=bh + rh * frac,
+                w=w,
+                d=RACK_CROSSBAR_T_M,
+                h=RACK_CROSSBAR_H_M,
+                collection=col,
+            )
+            all_objs.append(cbar)
+
     # ── Side panels ────────────────────────────────────────────────────────
     if include_side_panels:
         for sx, tag in ((-1, "L"), (1, "R")):
@@ -385,33 +586,73 @@ def create_rack_cabinet(
             )
             all_objs.append(panel)
 
-    # ── Rear panel ─────────────────────────────────────────────────────────
-    rear = _create_box_object(
-        f"{col_name}_panel_R",
-        cx=0.0,
-        cy=d - st / 2,
-        cz=tot / 2,
-        w=w, d=st, h=tot,
-        collection=col,
-    )
-    all_objs.append(rear)
-
-    # ── Top panel ──────────────────────────────────────────────────────────
-    if include_top_panel:
-        top = _create_box_object(
-            f"{col_name}_panel_top",
+    # ── Rear panel (optional — open by default) ────────────────────────────
+    if include_rear_panel:
+        rear = _create_box_object(
+            f"{col_name}_panel_rear",
             cx=0.0,
-            cy=d / 2,
-            cz=tot - th / 2,
-            w=w, d=d, h=th,
+            cy=d - st / 2,
+            cz=tot / 2,
+            w=w, d=st, h=tot,
             collection=col,
         )
-        all_objs.append(top)
+        all_objs.append(rear)
 
-    # ── Door hardware (hinge pins + latch) ─────────────────────────────────
+    # ── Top cap enclosure walls (front + rear of the fan/exhaust zone) ────────
+    # The top cap zone sits between the fan tray (bh+rh) and the top panel (tot).
+    # Side panels already cover the full height; front and rear need closing strips.
+    if include_top_panel:
+        cap_front = _create_box_object(
+            f"{col_name}_topcap_front",
+            cx=0.0, cy=st / 2, cz=bh + rh + th / 2,
+            w=w, d=st, h=th, collection=col,
+        )
+        all_objs.append(cap_front)
+        cap_rear = _create_box_object(
+            f"{col_name}_topcap_rear",
+            cx=0.0, cy=d - st / 2, cz=bh + rh + th / 2,
+            w=w, d=st, h=th, collection=col,
+        )
+        all_objs.append(cap_rear)
+
+    # ── Top panel — solid with exhaust slots over fan zone ─────────────────
+    # Thin sheet at the very top; slots aligned directly above the fan zone.
+    if include_top_panel:
+        top_parts = _create_zoned_vent_plate(
+            name_prefix=f"{col_name}_panel_top",
+            w=w, d=d,
+            cz=tot - st / 2,
+            h=st,
+            collection=col,
+        )
+        all_objs.extend(top_parts)
+
+    # ── Exhaust fan tray (1U, 2×2 fans) ───────────────────────────────────
+    # Sits at the bottom of the top cap zone (immediately above the rail zone).
+    # 4 × 120 mm fan frame plates in a 2×2 grid — visible from above and in
+    # top-down renders; also visible when the top lid is removed in UE5.
+    if include_fan_tray:
+        fan_parts = _create_fan_tray(
+            name_prefix=col_name,
+            w=w,
+            d=d,
+            z_base=bh + rh,
+            collection=col,
+        )
+        all_objs.extend(fan_parts)
+
+    # ── Door hardware (hinge pins + latch, front and rear) ─────────────────
     if include_door_mounts:
-        hw = _add_door_hardware(col_name, w=w, base_h=bh, rail_h=rh, collection=col)
-        all_objs.extend(hw)
+        hw_front = _add_door_hardware(
+            col_name, w=w, base_h=bh, rail_h=rh, collection=col,
+            face="front", depth=d,
+        )
+        hw_rear = _add_door_hardware(
+            col_name, w=w, base_h=bh, rail_h=rh, collection=col,
+            face="rear", depth=d,
+        )
+        all_objs.extend(hw_front)
+        all_objs.extend(hw_rear)
 
     # ── Join parts (if requested) then set origin once ────────────────────
     # Origin is always placed at base-front-centre:

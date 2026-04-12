@@ -444,7 +444,10 @@ def create_bay(
     # ── Parent bay collection ──────────────────────────────────────────────
     bay_col = _get_or_create_collection(bay_name)
 
-    # ── Row A (cold-aisle side) ────────────────────────────────────────────
+    # ── Row A (cold-aisle side, front faces cold aisle) ───────────────────
+    # Row A is placed at start_y_m and then rotated 180° around Z so its
+    # front face points toward +Y (into the cold aisle).
+    # After rotation: front at start_y_m (faces +Y), rear at start_y_m - rack_d_m.
     row_a_name = f"{bay_name}_Row_A"
     row_a_y    = start_y_m
     create_rack_row(
@@ -458,12 +461,21 @@ def create_bay(
         start_y_m=row_a_y,
         parent_collection=bay_name,
     )
+    # Front-to-front fix: rotate Row_A 180° so front faces +Y (toward cold aisle)
+    row_a_col = bpy.data.collections.get(row_a_name)
+    if row_a_col:
+        for rack_subcol in row_a_col.children:
+            for obj in rack_subcol.all_objects:
+                if obj.parent is None:
+                    obj.rotation_euler.z += math.pi
 
-    # ── Row B (hot-aisle side, front faces hot aisle) ──────────────────────
-    # Row B is placed so its front face is at row_a_y + rack_d_m + aisle_m,
-    # i.e. the cold aisle fits between Row A's rear and Row B's front.
+    # ── Row B (cold-aisle side, front faces cold aisle) ───────────────────
+    # Row B front face is at start_y_m + aisle_m (no rotation — front faces -Y).
+    # Cold aisle = gap between Row_A front (start_y_m) and Row_B front (start_y_m+aisle_m).
+    # Row_A rear: start_y_m - rack_d_m (hot side).
+    # Row_B rear: start_y_m + aisle_m + rack_d_m (hot side).
     row_b_name = f"{bay_name}_Row_B"
-    row_b_y    = start_y_m + rack_d_m + aisle_m
+    row_b_y    = start_y_m + aisle_m
     create_rack_row(
         row_name=row_b_name,
         rack_count=racks_per_row,
@@ -477,15 +489,15 @@ def create_bay(
     )
 
     # ── Floor tiles (cold aisle) ───────────────────────────────────────────
-    # 600 mm × 600 mm industry-standard raised floor tiles.
+    # Tiles cover the cold aisle: Row_A front to Row_B front.
     tile_col_name = f"{bay_name}_FloorTiles"
     tile_col      = _get_or_create_collection(tile_col_name)
     _nest_collection(tile_col, bay_col)
 
     tile_size_m   = 0.600
     tile_thick_m  = 0.030
-    # Aisle runs from Row A rear (start_y_m + rack_d_m) to Row B front (row_b_y)
-    aisle_y_start = start_y_m + rack_d_m
+    # Cold aisle spans from Row_A front face (start_y_m) to Row_B front face (row_b_y)
+    aisle_y_start = start_y_m
     aisle_y_end   = row_b_y
     aisle_y_ctr   = (aisle_y_start + aisle_y_end) / 2.0
 

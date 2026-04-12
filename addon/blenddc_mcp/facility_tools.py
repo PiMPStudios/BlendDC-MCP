@@ -45,6 +45,13 @@ from constants import (
     CABLE_TRAY_DEPTH_M,
     CABLE_TRAY_WALL_THICK_M,
     SOCKET_PREFIX,
+    RF_PEDESTAL_BASE_W_M, RF_PEDESTAL_BASE_H_M,
+    RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_H_M,
+    RF_PEDESTAL_HEAD_W_M, RF_PEDESTAL_HEAD_H_M,
+    RF_PEDESTAL_TOTAL_H_M,
+    RF_GRID_M,
+    RF_STRINGER_W_M, RF_STRINGER_H_M,
+    RF_TILE_W_M, RF_TILE_D_M, RF_TILE_H_M, RF_TILE_GROUT_M,
 )
 
 
@@ -113,6 +120,116 @@ def _obj_seed(base_seed: int, name: str) -> int:
     return h
 
 
+def _create_raised_floor(
+    zone_name: str,
+    x0: float,
+    y0: float,
+    width: float,
+    depth: float,
+    parent_col: bpy.types.Collection,
+) -> None:
+    """
+    Create a Tate-style raised floor system in the specified XY zone.
+
+    Generates a full pedestal grid (base plate + shaft + head plate), stringers
+    connecting adjacent pedestals, and floor tiles resting on the pedestal heads.
+
+    All geometry sits at Z ≤ 0.  The finished floor surface (top of tiles) is at Z = 0.
+    Tile Z spans [-RF_TILE_H_M, 0].  Pedestals hang down below -RF_TILE_H_M.
+
+    zone_name:  unique name prefix for this floor zone (avoids object name collisions)
+    x0, y0:    world XY of the zone's bottom-left corner (min X, min Y)
+    width:     zone extent in X metres
+    depth:     zone extent in Y metres
+    parent_col: collection to nest the raised-floor sub-collection into
+    """
+    rf_col = _get_or_create_collection(zone_name)
+    _nest_collection(rf_col, parent_col)
+
+    # Number of pedestals along each axis — pedestals at every grid intersection
+    # including both endpoints, so count = floor(span / grid) + 1
+    import math as _math
+    nx = max(2, _math.floor(width  / RF_GRID_M) + 1)
+    ny = max(2, _math.floor(depth  / RF_GRID_M) + 1)
+
+    # Pedestal Z stack (from top tile surface down):
+    #   tile top  = 0
+    #   tile bot  = -RF_TILE_H_M
+    #   head top  = -RF_TILE_H_M
+    #   head bot  = -RF_TILE_H_M - RF_PEDESTAL_HEAD_H_M
+    #   shaft top = -RF_TILE_H_M - RF_PEDESTAL_HEAD_H_M
+    #   shaft bot = -RF_TILE_H_M - RF_PEDESTAL_HEAD_H_M - RF_PEDESTAL_SHAFT_H_M
+    #   base top  = shaft bot
+    #   base bot  = shaft bot - RF_PEDESTAL_BASE_H_M
+
+    head_top_z  = -RF_TILE_H_M
+    head_cz     = head_top_z - RF_PEDESTAL_HEAD_H_M / 2
+    shaft_top_z = head_top_z - RF_PEDESTAL_HEAD_H_M
+    shaft_cz    = shaft_top_z - RF_PEDESTAL_SHAFT_H_M / 2
+    base_top_z  = shaft_top_z - RF_PEDESTAL_SHAFT_H_M
+    base_cz     = base_top_z - RF_PEDESTAL_BASE_H_M / 2
+
+    obj_idx = [0]   # mutable counter via list to avoid nonlocal
+
+    def _box(name, cx, cy, cz, w, d, h):
+        _create_box_object(name, cx=cx, cy=cy, cz=cz, w=w, d=d, h=h, collection=rf_col)
+        obj_idx[0] += 1
+
+    # ── Pedestals ──────────────────────────────────────────────────────────
+    for iy in range(ny):
+        for ix in range(nx):
+            px = x0 + ix * RF_GRID_M
+            py = y0 + iy * RF_GRID_M
+            n  = ix + iy * nx
+            # Base plate
+            _box(f"{zone_name}_ped_{n}_base", px, py, base_cz,
+                 RF_PEDESTAL_BASE_W_M, RF_PEDESTAL_BASE_W_M, RF_PEDESTAL_BASE_H_M)
+            # Shaft
+            _box(f"{zone_name}_ped_{n}_shaft", px, py, shaft_cz,
+                 RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_H_M)
+            # Head plate
+            _box(f"{zone_name}_ped_{n}_head", px, py, head_cz,
+                 RF_PEDESTAL_HEAD_W_M, RF_PEDESTAL_HEAD_W_M, RF_PEDESTAL_HEAD_H_M)
+
+    # ── Stringers ──────────────────────────────────────────────────────────
+    # Horizontal cross-members connecting adjacent pedestal heads.
+    # X-direction stringers (between columns in the same row)
+    stringer_cz = head_cz  # stringer sits at the same height as head plate centre
+    span_x_len  = RF_GRID_M - RF_PEDESTAL_HEAD_W_M   # stringer clear span in X
+    span_y_len  = RF_GRID_M - RF_PEDESTAL_HEAD_W_M   # stringer clear span in Y
+
+    for iy in range(ny):
+        for ix in range(nx - 1):
+            sx = x0 + ix * RF_GRID_M + RF_GRID_M / 2
+            sy = y0 + iy * RF_GRID_M
+            n  = ix + iy * (nx - 1)
+            _box(f"{zone_name}_str_x_{n}", sx, sy, stringer_cz,
+                 span_x_len, RF_STRINGER_W_M, RF_STRINGER_H_M)
+
+    # Y-direction stringers (between rows in the same column)
+    for iy in range(ny - 1):
+        for ix in range(nx):
+            sx = x0 + ix * RF_GRID_M
+            sy = y0 + iy * RF_GRID_M + RF_GRID_M / 2
+            n  = ix + iy * nx
+            _box(f"{zone_name}_str_y_{n}", sx, sy, stringer_cz,
+                 RF_STRINGER_W_M, span_y_len, RF_STRINGER_H_M)
+
+    # ── Floor tiles ────────────────────────────────────────────────────────
+    # One tile per grid cell (between four pedestal corners).
+    tile_h   = RF_TILE_H_M
+    tile_gap = RF_TILE_GROUT_M
+    tile_cz  = -tile_h / 2
+
+    for iy in range(ny - 1):
+        for ix in range(nx - 1):
+            tcx = x0 + ix * RF_GRID_M + RF_GRID_M / 2
+            tcy = y0 + iy * RF_GRID_M + RF_GRID_M / 2
+            n   = ix + iy * (nx - 1)
+            _box(f"{zone_name}_tile_{n}", tcx, tcy, tile_cz,
+                 RF_TILE_W_M - tile_gap, RF_TILE_D_M - tile_gap, tile_h)
+
+
 def _section_col(section_name: str) -> bpy.types.Collection:
     """Return the facility section collection, raising if not found or wrong type."""
     col = bpy.data.collections.get(section_name)
@@ -151,6 +268,7 @@ def create_facility_section(
     start_y_m: float = 0.0,
     populate_preset: Optional[str] = None,
     hot_aisle_containment: bool = False,
+    hot_aisle_width_mm: float = 900.0,
 ) -> Dict[str, Any]:
     """
     Create a rectangular facility section: a grid of empty bays with
@@ -181,21 +299,24 @@ def create_facility_section(
     """
     import bay_tools as _bt
 
-    rack_w_m   = width_mm  / 1000.0
-    rack_d_m   = depth_mm  / 1000.0
-    rack_gap_m = 0.050
-    aisle_m    = aisle_width_mm / 1000.0
+    rack_w_m      = width_mm  / 1000.0
+    rack_d_m      = depth_mm  / 1000.0
+    rack_gap_m    = 0.050
+    aisle_m       = aisle_width_mm   / 1000.0   # cold aisle
+    hot_aisle_m   = hot_aisle_width_mm / 1000.0 # hot aisle (between bay rears)
 
-    # Bay footprint:
+    # Bay footprint (front-to-front cold aisle layout):
     #   X: racks_per_bay * (rack_w_m + rack_gap_m) - rack_gap_m
-    #   Y: rack_d_m (Row_A) + aisle_m (cold) + rack_d_m (Row_B) + aisle_m (hot)
+    #   Y: rack_d_m (Row_A, hot side) + cold_aisle + rack_d_m (Row_B, hot side)
+    #      Hot aisles live between adjacent bays (exterior to each bay).
     step_rack_m    = rack_w_m + rack_gap_m
     bay_length_x   = racks_per_bay * step_rack_m - rack_gap_m
-    bay_width_y    = rack_d_m + aisle_m + rack_d_m + aisle_m   # cold + hot
+    bay_span_y     = rack_d_m + aisle_m + rack_d_m   # bay Y span (no hot aisle)
 
-    # Step between bay origins
+    # Step between bay origins — includes hot aisle between Row_B rear of bay N
+    # and Row_A rear of bay N+1.
     bay_step_x = bay_length_x + bay_spacing_x_m
-    bay_step_y = bay_width_y  + bay_spacing_y_m
+    bay_step_y = bay_span_y + hot_aisle_m + bay_spacing_y_m
 
     # ── Parent collection ──────────────────────────────────────────────────
     facility_col_name = f"Facility_{section_name}"
@@ -210,7 +331,9 @@ def create_facility_section(
             bay_idx  = row * bays_x + col + 1
             bay_name = f"{section_name}_Bay_{bay_idx:02d}"
             bx       = start_x_m + col * bay_step_x
-            by       = start_y_m + row * bay_step_y
+            # Offset by rack_d_m so Row_A rear (at by - rack_d_m after rotation)
+            # sits at start_y_m, keeping the entire facility in positive Y space.
+            by       = start_y_m + rack_d_m + row * bay_step_y
 
             if populate_preset:
                 preset_clean = populate_preset.lower().replace(" ", "_")
@@ -258,24 +381,49 @@ def create_facility_section(
                 "y_m":   round(by, 4),
             })
 
-    # ── Raised floor slab ─────────────────────────────────────────────────
-    slab_col_name = f"{section_name}_FloorSlab"
-    slab_col      = _get_or_create_collection(slab_col_name)
-    _nest_collection(slab_col, facility_col)
-
+    # ── Raised floor system (Tate-style: pedestals + stringers + tiles) ─────
+    # Geometry zone dimensions for wall/return calculations (unchanged by floor type)
     slab_w = bays_x * bay_step_x - bay_spacing_x_m
     slab_d = bays_y * bay_step_y - bay_spacing_y_m
-    slab_h = 0.030
 
-    slab = _create_box_object(
-        f"{section_name}_FloorSlab",
-        cx=start_x_m + slab_w / 2,
-        cy=start_y_m + slab_d / 2,
-        cz=-slab_h / 2,
-        w=slab_w, d=slab_d, h=slab_h,
-        collection=slab_col,
-    )
-    slab["is_floor_slab"] = True
+    rf_parent_col_name = f"{section_name}_RaisedFloor"
+    rf_parent_col      = _get_or_create_collection(rf_parent_col_name)
+    _nest_collection(rf_parent_col, facility_col)
+
+    zone_idx = 0
+    for row in range(bays_y):
+        for col in range(bays_x):
+            bx = start_x_m + col * bay_step_x
+            by = start_y_m + rack_d_m + row * bay_step_y
+
+            # Cold aisle zone (between Row_A front and Row_B front)
+            _create_raised_floor(
+                zone_name=f"{section_name}_RF_{zone_idx:03d}_cold",
+                x0=bx, y0=by,
+                width=bay_length_x, depth=aisle_m,
+                parent_col=rf_parent_col,
+            )
+            zone_idx += 1
+
+            # Row_A footprint (rack_d_m behind Row_A front face)
+            _create_raised_floor(
+                zone_name=f"{section_name}_RF_{zone_idx:03d}_rowA",
+                x0=bx, y0=by - rack_d_m,
+                width=bay_length_x, depth=rack_d_m,
+                parent_col=rf_parent_col,
+            )
+            zone_idx += 1
+
+            # Row_B footprint (rack_d_m forward of Row_B front face)
+            _create_raised_floor(
+                zone_name=f"{section_name}_RF_{zone_idx:03d}_rowB",
+                x0=bx, y0=by + aisle_m,
+                width=bay_length_x, depth=rack_d_m,
+                parent_col=rf_parent_col,
+            )
+            zone_idx += 1
+            # Hot aisles (at perimeter between bays) intentionally excluded
+            # from raised floor for performance — CRAC units cover that zone
 
     # ── Perimeter walls ───────────────────────────────────────────────────
     wall_names: List[str] = []
@@ -322,7 +470,9 @@ def create_facility_section(
     facility_col["section_u_height"]    = u_height
     facility_col["section_width_mm"]    = width_mm
     facility_col["section_depth_mm"]    = depth_mm
-    facility_col["section_aisle_mm"]    = aisle_width_mm
+    facility_col["section_aisle_mm"]     = aisle_width_mm
+    facility_col["section_hot_aisle_mm"] = hot_aisle_width_mm
+    facility_col["section_rack_d_m"]     = round(rack_d_m, 4)
     facility_col["section_start_x_m"]   = round(start_x_m, 4)
     facility_col["section_start_y_m"]   = round(start_y_m, 4)
     facility_col["section_footprint_x"] = round(slab_w, 4)

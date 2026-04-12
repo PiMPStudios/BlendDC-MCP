@@ -97,3 +97,58 @@ VERT_CABLE_MGMT_WIDTH_M  = 0.050          # 50 mm vertical channel width
 # ── LOD defaults ───────────────────────────────────────────────────────────
 LOD1_DEFAULT_RATIO = 0.40   # LOD1 target: 40 % of LOD0 triangles
 LOD2_DEFAULT_RATIO = 0.15   # LOD2 target: 15 % of LOD0 triangles
+
+# ── Raised floor system (Tate-style) ──────────────────────────────────────
+# Pedestals: 150×150mm base plate, 50mm square shaft, 100×100mm head plate
+# Tile surface is at Z=0 (finished floor); all raised floor geometry is at Z < 0
+RF_PEDESTAL_BASE_W_M  = 0.150   # 150 mm base plate width / depth
+RF_PEDESTAL_BASE_H_M  = 0.006   # 6 mm base plate thickness
+RF_PEDESTAL_SHAFT_W_M = 0.050   # 50 mm square shaft cross-section
+RF_PEDESTAL_SHAFT_H_M = 0.438   # shaft height = 450 - 6 (base) - 6 (head) = 438 mm
+RF_PEDESTAL_HEAD_W_M  = 0.100   # 100 mm head plate width / depth
+RF_PEDESTAL_HEAD_H_M  = 0.006   # 6 mm head plate thickness
+RF_PEDESTAL_TOTAL_H_M = 0.450   # total pedestal assembly height (plenum)
+RF_GRID_M             = 0.600   # 600 mm grid module (pedestal spacing)
+RF_STRINGER_W_M       = 0.025   # 25 mm stringer cross-section width
+RF_STRINGER_H_M       = 0.025   # 25 mm stringer cross-section height
+RF_TILE_W_M           = 0.600   # 600 mm tile width
+RF_TILE_D_M           = 0.600   # 600 mm tile depth
+RF_TILE_H_M           = 0.025   # 25 mm tile thickness
+RF_TILE_GROUT_M       = 0.004   # 4 mm grout gap between tiles
+
+# ── Fan tray (top exhaust, 1U section at top of rail zone) ────────────────
+FAN_TRAY_HEIGHT_M     = RACK_U_M   # fan tray is exactly 1U (44.45 mm) tall
+FAN_TRAY_PANEL_H_M    = 0.002      # 2 mm tray plate thickness
+
+# Fan zone footprint (2×2 array of 120 mm fans, 6 mm frame between each)
+FAN_SIZE_M        = 0.120   # 120 mm per fan
+FAN_FRAME_WALL_M  = 0.006   # 6 mm frame wall between fans
+FAN_GRID_COLS     = 2
+FAN_GRID_ROWS     = 2
+# Derived zone size: 2*120 + 1*6 = 246 mm square, centred in rack width/depth
+
+# ── Vent slot geometry (fan tray intake + top cap exhaust) ────────────────
+# Slots confined to the 2×2 fan zone only; surrounding plate stays solid
+VENT_BAR_W_M    = 0.005   # 5 mm solid bar between slot openings
+VENT_SLOT_GAP_M = 0.020   # 20 mm open slot
+
+# ── Floor mounting L-brackets (bolt-to-floor anchors, replaces casters) ───
+# Vertical plate against outer post face; horizontal flange on floor
+FLOOR_BRACKET_VERT_H_M   = 0.080   # 80 mm tall vertical plate
+FLOOR_BRACKET_VERT_W_M   = 0.040   # 40 mm wide (spans post outer face)
+FLOOR_BRACKET_VERT_T_M   = 0.005   # 5 mm sheet metal thickness
+FLOOR_BRACKET_FLANGE_L_M = 0.060   # 60 mm floor flange length (outward from post)
+FLOOR_BRACKET_FLANGE_T_M = 0.005   # 5 mm flange thickness
+
+# ── Trapeze cable tray hangers ────────────────────────────────────────────
+# Ceiling anchor plate → M8 threaded rod → trapeze bar cradling tray bottom
+TRAPEZE_CEILING_PLATE_W_M = 0.060   # 60 mm square ceiling anchor plate
+TRAPEZE_CEILING_PLATE_T_M = 0.008   # 8 mm thick
+TRAPEZE_ROD_DIAM_M        = 0.008   # 8 mm all-thread rod (modelled as square box)
+TRAPEZE_BAR_H_M           = 0.030   # 30 mm tall trapeze bar
+TRAPEZE_BAR_T_M           = 0.004   # 4 mm thick trapeze bar stock
+TRAPEZE_BAR_OVERHANG_M    = 0.040   # bar extends 40 mm past each tray wall
+
+# ── Structural crossbars ──────────────────────────────────────────────────
+RACK_CROSSBAR_H_M = 0.030   # 30 mm tall horizontal structural crossbar
+RACK_CROSSBAR_T_M = 0.004   # 4 mm thick

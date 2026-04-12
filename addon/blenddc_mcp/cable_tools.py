@@ -46,6 +46,9 @@ from constants import (
     CABLE_TRAY_DEPTH_M,
     CABLE_TRAY_WALL_THICK_M,
     VERT_CABLE_MGMT_WIDTH_M,
+    TRAPEZE_CEILING_PLATE_W_M, TRAPEZE_CEILING_PLATE_T_M,
+    TRAPEZE_ROD_DIAM_M,
+    TRAPEZE_BAR_H_M, TRAPEZE_BAR_T_M, TRAPEZE_BAR_OVERHANG_M,
 )
 
 
@@ -435,28 +438,26 @@ def add_overhead_cable_tray(
     start_x_m: float = 0.0,
     start_y_m: float = 0.0,
     z_m: float = 2.3,
+    ceiling_height_m: float = 3.5,
     collection_name: str = "CableTrays",
 ) -> Dict[str, Any]:
     """
     Create a parametric overhead cable tray (U-channel ladder) running along a row.
 
     Builds a full U-channel profile (bottom plate + two side walls) along the X axis.
-    Vertical drop-down support brackets are added at regular intervals.
-    An optional lid panel closes the top of the channel.
-
-    This is more detailed than the basic tray in bay_tools — suitable for
-    close-up hero shots and VCM integration.
+    Trapeze hangers (ceiling anchor plate → M8 all-thread rod → trapeze bar) are added
+    at regular intervals. The tray is suspended from the ceiling — it does not float.
 
     tray_name:          base name for tray objects
     length_m:           run length in metres (X axis)
     width_mm:           inner channel width in mm (default 200)
     height_mm:          channel side wall height in mm (default 100)
-    bracket_interval_m: distance between drop-down support brackets in metres
-                        (default 1.2 — roughly every 2 racks; set 0 to skip)
+    bracket_interval_m: spacing between trapeze hangers in metres (default 1.2; 0 = skip)
     with_lid:           add a flat lid panel over the channel opening (default False)
     start_x_m:          world X of tray start
     start_y_m:          world Y of tray centreline
-    z_m:                world Z of tray bottom face (set to top-of-rack height)
+    z_m:                world Z of tray bottom face (top-of-rack height)
+    ceiling_height_m:   world Z of the ceiling where hangers attach (default 3.5 m)
     collection_name:    collection to place tray objects into
     """
     tray_col = _get_or_create_collection(collection_name)
@@ -495,11 +496,11 @@ def add_overhead_cable_tray(
             w=length_m, d=w, h=wt, collection=tray_col)
         parts.append(lid)
 
-    # Support brackets — thin flat plates dropping from tray bottom
+    # Trapeze hangers — ceiling plate + threaded rod + trapeze bar
+    # Each hanger suspends the tray from the ceiling structure above.
+    # Geometry: square ceiling plate → vertical all-thread rod → horizontal bar
     bracket_names: List[str] = []
-    bracket_h = 0.060    # 60 mm drop bracket
-    bracket_t = 0.004    # 4 mm thick
-    bracket_w = w + 0.020  # slightly wider than tray
+    bar_span = w + 2 * TRAPEZE_BAR_OVERHANG_M  # bar wider than tray channel
 
     if bracket_interval_m and bracket_interval_m > 0:
         n_brackets = max(1, int(length_m / bracket_interval_m))
@@ -507,13 +508,47 @@ def add_overhead_cable_tray(
             bx = start_x_m + i * bracket_interval_m
             if bx > start_x_m + length_m + 0.001:
                 break
-            br = _create_box_object(f"{tray_name}_bracket_{i:02d}",
-                cx=bx, cy=cy, cz=cz_base - bracket_h / 2,
-                w=bracket_t, d=bracket_w, h=bracket_h,
-                collection=tray_col)
-            br["is_tray_bracket"] = True
-            parts.append(br)
-            bracket_names.append(br.name)
+
+            # Ceiling anchor plate — sits at ceiling height, centred over tray
+            ceil_plate = _create_box_object(
+                f"{tray_name}_hanger_{i:02d}_plate",
+                cx=bx, cy=cy,
+                cz=ceiling_height_m - TRAPEZE_CEILING_PLATE_T_M / 2,
+                w=TRAPEZE_CEILING_PLATE_W_M,
+                d=TRAPEZE_CEILING_PLATE_W_M,
+                h=TRAPEZE_CEILING_PLATE_T_M,
+                collection=tray_col,
+            )
+            ceil_plate["is_tray_bracket"] = True
+            parts.append(ceil_plate)
+            bracket_names.append(ceil_plate.name)
+
+            # Vertical all-thread rod — from ceiling plate down to tray level
+            rod_top_z = ceiling_height_m - TRAPEZE_CEILING_PLATE_T_M
+            rod_bot_z = cz_base
+            rod_len   = rod_top_z - rod_bot_z
+            rod = _create_box_object(
+                f"{tray_name}_hanger_{i:02d}_rod",
+                cx=bx, cy=cy,
+                cz=rod_bot_z + rod_len / 2,
+                w=TRAPEZE_ROD_DIAM_M, d=TRAPEZE_ROD_DIAM_M, h=rod_len,
+                collection=tray_col,
+            )
+            rod["is_tray_bracket"] = True
+            parts.append(rod)
+            bracket_names.append(rod.name)
+
+            # Trapeze bar — horizontal bar at tray bottom, cradling the tray
+            bar = _create_box_object(
+                f"{tray_name}_hanger_{i:02d}_bar",
+                cx=bx, cy=cy,
+                cz=cz_base - TRAPEZE_BAR_H_M / 2,
+                w=TRAPEZE_BAR_T_M, d=bar_span, h=TRAPEZE_BAR_H_M,
+                collection=tray_col,
+            )
+            bar["is_tray_bracket"] = True
+            parts.append(bar)
+            bracket_names.append(bar.name)
 
     # Join all tray parts into one mesh
     bpy.ops.object.select_all(action='DESELECT')
@@ -538,8 +573,10 @@ def add_overhead_cable_tray(
         "width_mm":     width_mm,
         "height_mm":    height_mm,
         "with_lid":     with_lid,
-        "brackets":     len(bracket_names),
-        "z_m":          z_m,
+        "hangers":           len(bracket_names) // 3,
+        "hanger_objects":    len(bracket_names),
+        "z_m":               z_m,
+        "ceiling_height_m":  ceiling_height_m,
     }
 
 
