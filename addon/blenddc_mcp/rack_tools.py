@@ -107,6 +107,50 @@ def _set_origin_to(
             bpy.context.scene.cursor.location = saved
 
 
+def _bmesh_join(
+    name: str,
+    parts: List[bpy.types.Object],
+    collection: bpy.types.Collection,
+) -> bpy.types.Object:
+    """
+    Combine a list of mesh objects into a single joined mesh object.
+
+    For each part, the mesh data is copied and transformed by
+    Matrix.Translation(part.location) to bake the world position into vertex
+    coordinates.  The resulting object is placed at (0, 0, 0) so its origin
+    is the world origin (base-front-centre for rack parts).
+
+    All input part objects and their mesh data blocks are removed after joining.
+    Returns the new joined object.
+    """
+    combined_bm = bmesh.new()
+    tmp_meshes: List[bpy.types.Mesh] = []
+
+    for part in parts:
+        tmp = part.data.copy()
+        tmp.transform(mathutils.Matrix.Translation(part.location))
+        combined_bm.from_mesh(tmp)
+        tmp_meshes.append(tmp)
+
+    combined_mesh = bpy.data.meshes.new(name)
+    combined_bm.to_mesh(combined_mesh)
+    combined_bm.free()
+    combined_mesh.update()
+
+    joined = bpy.data.objects.new(name, combined_mesh)
+    joined.location = (0.0, 0.0, 0.0)
+    collection.objects.link(joined)
+
+    part_meshes = [p.data for p in parts]
+    for part in parts:
+        bpy.data.objects.remove(part, do_unlink=True)
+    for m in part_meshes + tmp_meshes:
+        if m.users == 0:
+            bpy.data.meshes.remove(m)
+
+    return joined
+
+
 def _create_l_rail(
     name: str,
     sign_x: int,
@@ -119,13 +163,11 @@ def _create_l_rail(
     ps: float,
     hs: float,
     collection: bpy.types.Collection,
-) -> List[bpy.types.Object]:
+    eia_holes: bool = True,
+    u_height: int = 42,
+) -> Dict[str, Any]:
     """
-    Create a continuous L-bracket mounting rail as two clean solid boxes.
-
-    The rail spans the full usable interior height (u_height × RACK_U_M) without
-    any slot divisions or Boolean cuts — EIA-310 holes are added via Geometry Nodes
-    in Phase 3.
+    Create a continuous L-bracket mounting rail: solid web + flange with EIA holes.
 
     Cross-section viewed from above (left front rail, sign_x = -1):
 
@@ -140,23 +182,38 @@ def _create_l_rail(
     flush with the post face: flange_cy = rf/2 for front rails (Y=0 → Y=rf),
     flange_cy = depth−rf/2 for rear rails (Y=depth−rf → Y=depth).
 
+    When eia_holes=True, the flange is built as a proper manifold mesh using
+    bmesh face-region extrusion:
+
+      1. Build the front face (XZ plane at Y=flange_front) using a consistent
+         3-column topology (left-margin | center | right-margin) for EVERY
+         segment along Z.  For bar segments all 3 quads are present; for hole
+         segments only the two margin quads exist (center is open = the hole).
+      2. remove_doubles merges shared vertices at every segment boundary,
+         giving a fully-connected 2D face mesh.
+      3. extrude_face_region extrudes all faces in +Y by rf.  Boundary edges
+         at the hole openings (inner walls at x_hl / x_hr, and top/bottom caps
+         where bars adjoin holes) automatically become closed rectangular
+         tunnels — no Boolean operations required.
+
+    This produces smooth, continuous L-brackets with clean square EIA-310
+    through-holes visible from the rack interior.  No "teeth" or serrated edges.
+
     sign_x:    -1 = left rail, +1 = right rail
-    cy:        Y-centre of the web (= post Y-centre, e.g. ps/2 for front posts)
+    cy:        Y-centre of the web
     flange_cy: Y-centre of the flange (rf/2 for front, rack_depth−rf/2 for rear)
     cz:        Z-centre of the rail (= base_h + rail_h / 2)
-    height:    full interior rail height (u_height × RACK_U_M = 1866.9 mm @ 42U)
+    height:    full interior rail height (u_height × RACK_U_M)
     rt:        web thickness  (RACK_RAIL_THICK_M  = 3 mm)
-    rf:        flange inward projection AND front-to-back depth
-               (RACK_RAIL_FLANGE_M = 20 mm — same value for both dimensions)
-    ps:        post size — web depth in Y (RACK_POST_SIZE_M = 60 mm)
+    rf:        flange inward projection AND front-to-back depth (20 mm)
+    ps:        post size (RACK_POST_SIZE_M = 60 mm)
     hs:        half EIA rail span (EIA_RAIL_SPAN_M / 2 = 241.3 mm)
+    eia_holes: True = build holed flange via bmesh; False = solid box flange
+    u_height:  rack unit count (used only when eia_holes=True)
 
-    Returns [web_obj, flange_obj].
+    Returns {"web": web_obj, "flange_parts": [flange_obj]}.
     """
-    objs: List[bpy.types.Object] = []
-
-    # Vertical web — rt thick × ps deep × full height
-    # Outer face sits at ±(hs + rt); inner face at ±hs (EIA inner-face line)
+    # ── Web: solid vertical plate, full height ─────────────────────────────
     web = _create_box_object(
         f"{name}_web",
         cx=sign_x * (hs + rt / 2),
@@ -165,21 +222,113 @@ def _create_l_rail(
         w=rt, d=ps, h=height,
         collection=collection,
     )
-    objs.append(web)
 
-    # Horizontal flange — rf inward (X) × rf deep (Y) × full height
-    # Flush with the post face for proper equipment mounting clearance
-    flange = _create_box_object(
-        f"{name}_flange",
-        cx=sign_x * (hs - rf / 2),
-        cy=flange_cy,
-        cz=cz,
-        w=rf, d=rf, h=height,
-        collection=collection,
-    )
-    objs.append(flange)
+    flange_cx = sign_x * (hs - rf / 2)
 
-    return objs
+    if not eia_holes:
+        flange = _create_box_object(
+            f"{name}_flange",
+            cx=flange_cx,
+            cy=flange_cy,
+            cz=cz,
+            w=rf, d=rf, h=height,
+            collection=collection,
+        )
+        return {"web": web, "flange_parts": [flange]}
+
+    # ── Flange with EIA-310 through-holes via bmesh face extrusion ──────────
+    #
+    # EIA-310 pattern per U (44.45 mm), measured from bottom of U:
+    #   Hole 1:  0.000 –  9.525 mm   (open)
+    #   Bar  1:  9.525 – 15.880 mm   6.355 mm solid
+    #   Hole 2: 15.880 – 25.405 mm   (open)
+    #   Bar  2: 25.405 – 28.570 mm   3.165 mm solid
+    #   Hole 3: 28.570 – 38.095 mm   (open)
+    #   Bar  3: 38.095 – 44.450 mm   6.355 mm solid (connects to next U)
+    #
+    # Topology in X (4 vertices per row): x_l … x_hl … x_hr … x_r
+    #   Bar segment  → 3 faces: [x_l,x_hl], [x_hl,x_hr], [x_hr,x_r]  (all solid)
+    #   Hole segment → 2 faces: [x_l,x_hl],              [x_hr,x_r]  (center open)
+    # After remove_doubles all shared boundary vertices merge cleanly.
+    # extrude_face_region then creates closed hole tunnels automatically:
+    #   inner walls at x_hl / x_hr from boundary vertical edges,
+    #   top/bottom hole caps from boundary horizontal edges.
+
+    hole_sz = RACK_HOLE_SIZE_M                      # 0.009525 m
+    off1    = RACK_HOLE_OFFSETS_MM[1] / 1000.0      # 0.01588 m
+    off2    = RACK_HOLE_OFFSETS_MM[2] / 1000.0      # 0.02857 m
+    u_m     = RACK_U_M                              # 0.04445 m
+
+    rail_base_z = cz - height / 2.0                 # Z of rail bottom
+
+    x_l  = flange_cx - rf / 2                       # outer X edge of flange
+    x_r  = flange_cx + rf / 2                       # inner X edge
+    x_hl = flange_cx - hole_sz / 2                  # left edge of hole
+    x_hr = flange_cx + hole_sz / 2                  # right edge of hole
+    y_f  = flange_cy - rf / 2                       # front face of flange (low Y)
+
+    bm = bmesh.new()
+
+    def _quad(x0: float, x1: float, z0: float, z1: float) -> None:
+        """Add one quad face on the front face (Y=y_f) of the flange."""
+        v0 = bm.verts.new((x0, y_f, z0))
+        v1 = bm.verts.new((x1, y_f, z0))
+        v2 = bm.verts.new((x1, y_f, z1))
+        v3 = bm.verts.new((x0, y_f, z1))
+        bm.faces.new([v0, v1, v2, v3])
+
+    for u in range(u_height):
+        uz = rail_base_z + u * u_m
+
+        # Six segments per U: (z_start, z_end, is_hole)
+        segs = [
+            (uz,               uz + hole_sz,     True),
+            (uz + hole_sz,     uz + off1,         False),
+            (uz + off1,        uz + off1 + hole_sz, True),
+            (uz + off1 + hole_sz, uz + off2,      False),
+            (uz + off2,        uz + off2 + hole_sz, True),
+            (uz + off2 + hole_sz, uz + u_m,       False),
+        ]
+
+        for z0, z1, is_hole in segs:
+            if z1 - z0 < 1e-9:
+                continue
+            if is_hole:
+                # Two margin quads; center is left open (the hole opening)
+                _quad(x_l, x_hl, z0, z1)
+                _quad(x_hr, x_r, z0, z1)
+            else:
+                # Three sub-quads — consistent 3-column topology at all Z levels
+                # so vertices at hole/bar boundaries merge cleanly after remove_doubles
+                _quad(x_l,  x_hl, z0, z1)
+                _quad(x_hl, x_hr, z0, z1)
+                _quad(x_hr, x_r,  z0, z1)
+
+    # Merge coincident vertices at segment boundaries
+    bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-6)
+
+    # Extrude the entire front-face region in +Y by rf.
+    # Boundary edges automatically become:
+    #   • inner hole walls  (vertical edges at x_hl / x_hr inside hole segments)
+    #   • top / bottom hole caps (horizontal edges at bar/hole Z boundaries)
+    #   • outer perimeter walls (all four outer edges of the flange)
+    original_faces = list(bm.faces)
+    ret = bmesh.ops.extrude_face_region(bm, geom=original_faces)
+    new_verts = [v for v in ret["geom"] if isinstance(v, bmesh.types.BMVert)]
+    bmesh.ops.translate(bm, vec=(0.0, rf, 0.0), verts=new_verts)
+
+    bm.normal_update()
+
+    flange_mesh = bpy.data.meshes.new(f"{name}_flange")
+    bm.to_mesh(flange_mesh)
+    bm.free()
+    flange_mesh.update()
+
+    flange = bpy.data.objects.new(f"{name}_flange", flange_mesh)
+    flange.location = (0.0, 0.0, 0.0)
+    collection.objects.link(flange)
+
+    return {"web": web, "flange_parts": [flange]}
 
 
 def _add_door_hardware(
@@ -402,6 +551,7 @@ def create_rack_cabinet(
     include_crossbars: bool = True,
     include_rear_panel: bool = False,
     join_mesh: bool = True,
+    eia_holes: bool = True,
 ) -> Dict[str, Any]:
     """
     Generate a parametric 4-post enclosed server rack cabinet.
@@ -432,6 +582,8 @@ def create_rack_cabinet(
     include_crossbars:   Add structural horizontal crossbars at rear posts
     include_rear_panel:  Add solid rear panel (default False — rear is open)
     join_mesh:           Join all parts into a single mesh object (default True)
+    eia_holes:           Punch EIA-310 square mounting holes into rail flanges
+                         (default True); set False for a solid flange (no holes)
 
     Returns collection name, object list, key sockets, rack dimensions, and origin.
     """
@@ -488,7 +640,8 @@ def create_rack_cabinet(
     col["rack_has_crossbars"]  = include_crossbars
     col["is_rack_cabinet"]     = True
 
-    all_objs: List[bpy.types.Object] = []
+    body_objs: List[bpy.types.Object] = []
+    rail_objs: List[bpy.types.Object] = []
 
     # ── Floor-mounting L-brackets (replaces simple base box) ──────────────
     # Four seismic anchor brackets — one at each corner post.
@@ -509,7 +662,7 @@ def create_rack_cabinet(
                 corner_tag=tag,
                 collection=col,
             )
-            all_objs.extend(bracket_parts)
+            body_objs.extend(bracket_parts)
 
     # ── 4 corner posts ─────────────────────────────────────────────────────
     post_configs = [
@@ -525,7 +678,7 @@ def create_rack_cabinet(
             w=ps, d=ps, h=tot,
             collection=col,
         )
-        all_objs.append(post)
+        body_objs.append(post)
 
     # ── Mounting rails — continuous L-brackets, full interior height ──────
     # Four rails: front-left, front-right, rear-left, rear-right.
@@ -553,8 +706,11 @@ def create_rack_cabinet(
             rt=rt, rf=rf, ps=ps,
             hs=half_span,
             collection=col,
+            eia_holes=eia_holes,
+            u_height=u_height,
         )
-        all_objs.extend(parts)
+        body_objs.append(parts["web"])
+        rail_objs.extend(parts["flange_parts"])
 
     # ── Structural crossbars ───────────────────────────────────────────────
     # Two horizontal bars connecting left/right rear posts at 1/3 and 2/3 height.
@@ -571,7 +727,7 @@ def create_rack_cabinet(
                 h=RACK_CROSSBAR_H_M,
                 collection=col,
             )
-            all_objs.append(cbar)
+            body_objs.append(cbar)
 
     # ── Side panels ────────────────────────────────────────────────────────
     if include_side_panels:
@@ -584,7 +740,7 @@ def create_rack_cabinet(
                 w=st, d=d, h=tot,
                 collection=col,
             )
-            all_objs.append(panel)
+            body_objs.append(panel)
 
     # ── Rear panel (optional — open by default) ────────────────────────────
     if include_rear_panel:
@@ -596,7 +752,7 @@ def create_rack_cabinet(
             w=w, d=st, h=tot,
             collection=col,
         )
-        all_objs.append(rear)
+        body_objs.append(rear)
 
     # ── Top cap enclosure walls (front + rear of the fan/exhaust zone) ────────
     # The top cap zone sits between the fan tray (bh+rh) and the top panel (tot).
@@ -607,13 +763,13 @@ def create_rack_cabinet(
             cx=0.0, cy=st / 2, cz=bh + rh + th / 2,
             w=w, d=st, h=th, collection=col,
         )
-        all_objs.append(cap_front)
+        body_objs.append(cap_front)
         cap_rear = _create_box_object(
             f"{col_name}_topcap_rear",
             cx=0.0, cy=d - st / 2, cz=bh + rh + th / 2,
             w=w, d=st, h=th, collection=col,
         )
-        all_objs.append(cap_rear)
+        body_objs.append(cap_rear)
 
     # ── Top panel — solid with exhaust slots over fan zone ─────────────────
     # Thin sheet at the very top; slots aligned directly above the fan zone.
@@ -625,7 +781,7 @@ def create_rack_cabinet(
             h=st,
             collection=col,
         )
-        all_objs.extend(top_parts)
+        body_objs.extend(top_parts)
 
     # ── Exhaust fan tray (1U, 2×2 fans) ───────────────────────────────────
     # Sits at the bottom of the top cap zone (immediately above the rail zone).
@@ -639,7 +795,7 @@ def create_rack_cabinet(
             z_base=bh + rh,
             collection=col,
         )
-        all_objs.extend(fan_parts)
+        body_objs.extend(fan_parts)
 
     # ── Door hardware (hinge pins + latch, front and rear) ─────────────────
     if include_door_mounts:
@@ -651,8 +807,8 @@ def create_rack_cabinet(
             col_name, w=w, base_h=bh, rail_h=rh, collection=col,
             face="rear", depth=d,
         )
-        all_objs.extend(hw_front)
-        all_objs.extend(hw_rear)
+        body_objs.extend(hw_front)
+        body_objs.extend(hw_rear)
 
     # ── Join parts (if requested) then set origin once ────────────────────
     # Origin is always placed at base-front-centre:
@@ -670,47 +826,15 @@ def create_rack_cabinet(
     # its correct world position in the final combined mesh.  The resulting
     # joined object is placed at location (0, 0, 0) — its origin IS already the
     # base-front-centre without any cursor trick needed.
-    joined_obj_name = None
-    if join_mesh and len(all_objs) >= 2:
-        combined_bm = bmesh.new()
-        tmp_meshes: List[bpy.types.Mesh] = []
+    if join_mesh and body_objs and rail_objs:
+        # Join body parts → {col_name}_Body
+        _bmesh_join(col_name + "_Body", body_objs, col)
+        # Join rail parts → {col_name}_Rails
+        _bmesh_join(col_name + "_Rails", rail_objs, col)
 
-        for part in all_objs:
-            # Copy mesh data and bake world transform into vertex positions.
-            # Use Matrix.Translation(part.location) rather than part.matrix_world
-            # because matrix_world is only updated by the depsgraph evaluator —
-            # freshly created objects (no depsgraph pass yet) have identity
-            # matrix_world, which collapses all parts to the origin and produces
-            # the cross/plus shape bug. All parts are pure translations (no
-            # rotation or scale), so Translation(location) IS the correct matrix.
-            tmp = part.data.copy()
-            tmp.transform(mathutils.Matrix.Translation(part.location))
-            combined_bm.from_mesh(tmp)   # BMesh.from_mesh APPENDS geometry
-            tmp_meshes.append(tmp)
-
-        combined_mesh = bpy.data.meshes.new(col_name)
-        combined_bm.to_mesh(combined_mesh)
-        combined_bm.free()
-        combined_mesh.update()
-
-        # Create the joined object at the world origin — no cursor trick required
-        joined = bpy.data.objects.new(col_name, combined_mesh)
-        joined.location = (0.0, 0.0, 0.0)
-        col.objects.link(joined)
-
-        # Remove individual part objects and free their mesh data
-        part_meshes = [p.data for p in all_objs]
-        for part in all_objs:
-            bpy.data.objects.remove(part, do_unlink=True)
-        for m in part_meshes + tmp_meshes:
-            if m.users == 0:
-                bpy.data.meshes.remove(m)
-
-        joined_obj_name = joined.name
-
-    else:
+    elif not join_mesh:
         # Each part gets origin at base-front-centre for consistent export
-        for obj in all_objs:
+        for obj in body_objs + rail_objs:
             _set_origin_to(obj, (0.0, 0.0, 0.0))
 
     # ── Build return ───────────────────────────────────────────────────────
@@ -727,7 +851,8 @@ def create_rack_cabinet(
         "collection":     col_name,
         "objects":        final_objects,
         "joined":         join_mesh,
-        "joined_object":  joined_obj_name,
+        "body_object":    col_name + "_Body" if join_mesh else None,
+        "rails_object":   col_name + "_Rails" if join_mesh else None,
         "sockets":        sockets,
         "u_height":       u_height,
         "external_dimensions_mm": {
