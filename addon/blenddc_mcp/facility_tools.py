@@ -162,13 +162,19 @@ def _create_raised_floor(
     depth: float,
     parent_col: bpy.types.Collection,
     tile_type: str = 'solid',
-    join_zone: bool = True,
 ) -> None:
     """
     Create a Tate-style raised floor system in the specified XY zone.
 
-    Generates a full pedestal grid (base plate + shaft + head plate), stringers
-    connecting adjacent pedestals, and floor tiles resting on the pedestal heads.
+    Generates a full pedestal grid (base plate + shaft + head plate) and
+    stringers, all joined into a single {zone_name}_Structure mesh (never
+    needs to be edited).  Each 600×600 floor tile is a separate object in
+    the {zone_name}_Tiles sub-collection so individual tiles can be selected,
+    replaced, or swapped to perforated independently.
+
+    Tile objects are named {zone_name}_tile_{ix}_{iy} where ix/iy are the
+    zero-based grid column/row indices, making cold-aisle tile identification
+    straightforward.
 
     Z coordinates — slab at Z = 0, finished floor (tile top) at Z = 0.450 m:
       base:    Z 0.000 → 0.006
@@ -176,34 +182,40 @@ def _create_raised_floor(
       head:    Z 0.444 → 0.450
       tile:    Z 0.425 → 0.450  (25 mm tile, flush with head top)
 
-    zone_name:  unique name prefix for this floor zone (avoids object name collisions)
+    zone_name:  unique name prefix for this floor zone
     x0, y0:    world XY of the zone's bottom-left corner (min X, min Y)
     width:     zone extent in X metres
     depth:     zone extent in Y metres
     parent_col: collection to nest the raised-floor sub-collection into
-    tile_type: 'solid' (standard tile) or 'perforated' (open-centre grate frame)
-    join_zone: if True, merge all part meshes into a single joined object
+    tile_type: 'solid' (full square tile) or 'perforated' (open-centre grate)
     """
     rf_col = _get_or_create_collection(zone_name)
     _nest_collection(rf_col, parent_col)
 
+    struct_col = _get_or_create_collection(f"{zone_name}_Structure")
+    _nest_collection(struct_col, rf_col)
+    tiles_col  = _get_or_create_collection(f"{zone_name}_Tiles")
+    _nest_collection(tiles_col, rf_col)
+
     import math as _math
-    nx = max(2, _math.floor(width  / RF_GRID_M) + 1)
-    ny = max(2, _math.floor(depth  / RF_GRID_M) + 1)
+    # ceil ensures full zone coverage — last pedestal row always lands at or
+    # beyond the far edge so every square metre of the zone gets a tile.
+    nx = max(2, _math.ceil(width  / RF_GRID_M) + 1)
+    ny = max(2, _math.ceil(depth  / RF_GRID_M) + 1)
 
     # Z centres — positive, slab at 0
-    base_cz     = RF_PEDESTAL_BASE_H_M / 2                                          # 0.003
-    shaft_cz    = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M / 2                  # 0.225
-    head_cz     = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M + RF_PEDESTAL_HEAD_H_M / 2  # 0.447
+    base_cz     = RF_PEDESTAL_BASE_H_M / 2
+    shaft_cz    = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M / 2
+    head_cz     = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M + RF_PEDESTAL_HEAD_H_M / 2
     stringer_cz = head_cz
-    tile_cz     = RF_PEDESTAL_TOTAL_H_M - RF_TILE_H_M / 2                           # 0.4375
+    tile_cz     = RF_PEDESTAL_TOTAL_H_M - RF_TILE_H_M / 2
 
-    part_objects: List[bpy.types.Object] = []
+    struct_parts: List[bpy.types.Object] = []
 
-    def _box(name, cx, cy, cz, w, d, h):
-        obj = _create_box_object(name, cx=cx, cy=cy, cz=cz, w=w, d=d, h=h, collection=rf_col)
-        part_objects.append(obj)
-        return obj
+    def _struct(name, cx, cy, cz, w, d, h):
+        obj = _create_box_object(name, cx=cx, cy=cy, cz=cz, w=w, d=d, h=h,
+                                  collection=struct_col)
+        struct_parts.append(obj)
 
     # ── Pedestals ──────────────────────────────────────────────────────────
     for iy in range(ny):
@@ -211,56 +223,62 @@ def _create_raised_floor(
             px = x0 + ix * RF_GRID_M
             py = y0 + iy * RF_GRID_M
             n  = ix + iy * nx
-            _box(f"{zone_name}_ped_{n}_base",  px, py, base_cz,
-                 RF_PEDESTAL_BASE_W_M,  RF_PEDESTAL_BASE_W_M,  RF_PEDESTAL_BASE_H_M)
-            _box(f"{zone_name}_ped_{n}_shaft", px, py, shaft_cz,
-                 RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_H_M)
-            _box(f"{zone_name}_ped_{n}_head",  px, py, head_cz,
-                 RF_PEDESTAL_HEAD_W_M,  RF_PEDESTAL_HEAD_W_M,  RF_PEDESTAL_HEAD_H_M)
+            _struct(f"{zone_name}_ped_{n}_base",  px, py, base_cz,
+                    RF_PEDESTAL_BASE_W_M,  RF_PEDESTAL_BASE_W_M,  RF_PEDESTAL_BASE_H_M)
+            _struct(f"{zone_name}_ped_{n}_shaft", px, py, shaft_cz,
+                    RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_H_M)
+            _struct(f"{zone_name}_ped_{n}_head",  px, py, head_cz,
+                    RF_PEDESTAL_HEAD_W_M,  RF_PEDESTAL_HEAD_W_M,  RF_PEDESTAL_HEAD_H_M)
 
     # ── Stringers ──────────────────────────────────────────────────────────
-    span_x_len = RF_GRID_M - RF_PEDESTAL_HEAD_W_M
-    span_y_len = RF_GRID_M - RF_PEDESTAL_HEAD_W_M
+    span_x = RF_GRID_M - RF_PEDESTAL_HEAD_W_M
+    span_y = RF_GRID_M - RF_PEDESTAL_HEAD_W_M
 
     for iy in range(ny):
         for ix in range(nx - 1):
-            sx = x0 + ix * RF_GRID_M + RF_GRID_M / 2
-            sy = y0 + iy * RF_GRID_M
-            n  = ix + iy * (nx - 1)
-            _box(f"{zone_name}_str_x_{n}", sx, sy, stringer_cz,
-                 span_x_len, RF_STRINGER_W_M, RF_STRINGER_H_M)
+            _struct(f"{zone_name}_str_x_{ix}_{iy}",
+                    x0 + ix * RF_GRID_M + RF_GRID_M / 2, y0 + iy * RF_GRID_M,
+                    stringer_cz, span_x, RF_STRINGER_W_M, RF_STRINGER_H_M)
 
     for iy in range(ny - 1):
         for ix in range(nx):
-            sx = x0 + ix * RF_GRID_M
-            sy = y0 + iy * RF_GRID_M + RF_GRID_M / 2
-            n  = ix + iy * nx
-            _box(f"{zone_name}_str_y_{n}", sx, sy, stringer_cz,
-                 RF_STRINGER_W_M, span_y_len, RF_STRINGER_H_M)
+            _struct(f"{zone_name}_str_y_{ix}_{iy}",
+                    x0 + ix * RF_GRID_M, y0 + iy * RF_GRID_M + RF_GRID_M / 2,
+                    stringer_cz, RF_STRINGER_W_M, span_y, RF_STRINGER_H_M)
 
-    # ── Floor tiles ────────────────────────────────────────────────────────
+    # Join all structure into one mesh — pedestals and stringers never move
+    if struct_parts:
+        _join_zone(f"{zone_name}_Structure", struct_parts, struct_col)
+
+    # ── Floor tiles — each tile is its own object ─────────────────────────
     tile_gap = RF_TILE_GROUT_M
     tw       = RF_TILE_W_M - tile_gap   # 596 mm
     td       = RF_TILE_D_M - tile_gap   # 596 mm
-    fw       = 0.020                    # 20 mm perforated tile frame border
+    fw       = 0.020                    # 20 mm frame border for perforated
 
     for iy in range(ny - 1):
         for ix in range(nx - 1):
-            tcx = x0 + ix * RF_GRID_M + RF_GRID_M / 2
-            tcy = y0 + iy * RF_GRID_M + RF_GRID_M / 2
-            n   = ix + iy * (nx - 1)
+            tcx  = x0 + ix * RF_GRID_M + RF_GRID_M / 2
+            tcy  = y0 + iy * RF_GRID_M + RF_GRID_M / 2
+            name = f"{zone_name}_tile_{ix}_{iy}"
 
             if tile_type == 'perforated':
-                # Open-centre grate: four border strips, hole in middle
-                _box(f"{zone_name}_tile_{n}_N", tcx,  tcy + (td - fw) / 2,  tile_cz, tw,         fw,             RF_TILE_H_M)
-                _box(f"{zone_name}_tile_{n}_S", tcx,  tcy - (td - fw) / 2,  tile_cz, tw,         fw,             RF_TILE_H_M)
-                _box(f"{zone_name}_tile_{n}_E", tcx + (tw - fw) / 2, tcy,   tile_cz, fw,         td - 2 * fw,    RF_TILE_H_M)
-                _box(f"{zone_name}_tile_{n}_W", tcx - (tw - fw) / 2, tcy,   tile_cz, fw,         td - 2 * fw,    RF_TILE_H_M)
+                # Perforated tile: four border strips joined into one object
+                strips: List[bpy.types.Object] = []
+                def _strip(sname, scx, scy, sw, sd):
+                    o = _create_box_object(sname, cx=scx, cy=scy, cz=tile_cz,
+                                           w=sw, d=sd, h=RF_TILE_H_M,
+                                           collection=tiles_col)
+                    strips.append(o)
+                _strip(f"{name}_N", tcx,                  tcy + (td - fw) / 2, tw,          fw)
+                _strip(f"{name}_S", tcx,                  tcy - (td - fw) / 2, tw,          fw)
+                _strip(f"{name}_E", tcx + (tw - fw) / 2,  tcy,                 fw, td - 2*fw)
+                _strip(f"{name}_W", tcx - (tw - fw) / 2,  tcy,                 fw, td - 2*fw)
+                _join_zone(name, strips, tiles_col)
             else:
-                _box(f"{zone_name}_tile_{n}", tcx, tcy, tile_cz, tw, td, RF_TILE_H_M)
-
-    if join_zone and part_objects:
-        _join_zone(f"{zone_name}_mesh", part_objects, rf_col)
+                _create_box_object(name, cx=tcx, cy=tcy, cz=tile_cz,
+                                   w=tw, d=td, h=RF_TILE_H_M,
+                                   collection=tiles_col)
 
 
 def _section_col(section_name: str) -> bpy.types.Collection:
@@ -421,87 +439,29 @@ def create_facility_section(
             })
 
     # ── Raised floor system (Tate-style: pedestals + stringers + tiles) ─────
-    # Y-band approach: one zone call per horizontal band spanning the full slab
-    # width.  This covers all cold aisles, hot aisles, rack rows, and front/rear
-    # corridors with the minimum possible number of mesh objects.
+    # Single unified zone from front corridor to rear corridor, all solid tiles.
+    # One continuous pedestal grid — no zone seams, no gaps.
+    # Cold-aisle tiles are swapped to perforated later once racks are placed.
 
-    # slab_w: full X span of rack rows only (corridors extend the same width)
     slab_w = bays_x * bay_step_x - bay_spacing_x_m
-    # slab_d used for wall calculation below — does NOT include corridors
+    # slab_d used for wall calculation — does NOT include corridors
     slab_d = bays_y * bay_step_y - bay_spacing_y_m
 
     rf_parent_col_name = f"{section_name}_RaisedFloor"
     rf_parent_col      = _get_or_create_collection(rf_parent_col_name)
     _nest_collection(rf_parent_col, facility_col)
 
-    floor_x0 = start_x_m
-    floor_w  = slab_w
-    zone_idx = 0
+    last_by_r   = start_y_m + rack_d_m + (bays_y - 1) * bay_step_y
+    floor_y0    = start_y_m - corridor_depth_m
+    floor_depth = (last_by_r + aisle_m + rack_d_m + corridor_depth_m) - floor_y0
 
-    # Front corridor (before first row)
     _create_raised_floor(
-        zone_name=f"{section_name}_RF_{zone_idx:03d}_corridor_front",
-        x0=floor_x0, y0=start_y_m - corridor_depth_m,
-        width=floor_w, depth=corridor_depth_m,
+        zone_name=f"{section_name}_RF_Floor",
+        x0=start_x_m, y0=floor_y0,
+        width=slab_w, depth=floor_depth,
         parent_col=rf_parent_col,
-        tile_type='solid', join_zone=True,
+        tile_type='solid',
     )
-    zone_idx += 1
-
-    for row in range(bays_y):
-        by_r = start_y_m + rack_d_m + row * bay_step_y
-
-        # Row_A footprint (solid tiles — under rack cabinets)
-        _create_raised_floor(
-            zone_name=f"{section_name}_RF_{zone_idx:03d}_rowA_{row}",
-            x0=floor_x0, y0=by_r - rack_d_m,
-            width=floor_w, depth=rack_d_m,
-            parent_col=rf_parent_col,
-            tile_type='solid', join_zone=True,
-        )
-        zone_idx += 1
-
-        # Cold aisle (perforated/grate tiles — cold air rises from plenum)
-        _create_raised_floor(
-            zone_name=f"{section_name}_RF_{zone_idx:03d}_cold_{row}",
-            x0=floor_x0, y0=by_r,
-            width=floor_w, depth=aisle_m,
-            parent_col=rf_parent_col,
-            tile_type='perforated', join_zone=True,
-        )
-        zone_idx += 1
-
-        # Row_B footprint (solid tiles — under rack cabinets)
-        _create_raised_floor(
-            zone_name=f"{section_name}_RF_{zone_idx:03d}_rowB_{row}",
-            x0=floor_x0, y0=by_r + aisle_m,
-            width=floor_w, depth=rack_d_m,
-            parent_col=rf_parent_col,
-            tile_type='solid', join_zone=True,
-        )
-        zone_idx += 1
-
-        # Hot aisle between this row and the next (solid tiles)
-        if row < bays_y - 1:
-            _create_raised_floor(
-                zone_name=f"{section_name}_RF_{zone_idx:03d}_hot_{row}",
-                x0=floor_x0, y0=by_r + aisle_m + rack_d_m,
-                width=floor_w, depth=hot_aisle_m + bay_spacing_y_m,
-                parent_col=rf_parent_col,
-                tile_type='solid', join_zone=True,
-            )
-            zone_idx += 1
-
-    # Rear corridor (after last row)
-    last_by_r = start_y_m + rack_d_m + (bays_y - 1) * bay_step_y
-    _create_raised_floor(
-        zone_name=f"{section_name}_RF_{zone_idx:03d}_corridor_rear",
-        x0=floor_x0, y0=last_by_r + aisle_m + rack_d_m,
-        width=floor_w, depth=corridor_depth_m,
-        parent_col=rf_parent_col,
-        tile_type='solid', join_zone=True,
-    )
-    zone_idx += 1
 
     # ── Perimeter walls ───────────────────────────────────────────────────
     wall_names: List[str] = []
