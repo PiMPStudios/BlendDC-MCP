@@ -384,7 +384,7 @@ def _add_door_hardware(
 
 def _create_floor_bracket(
     name_prefix: str,
-    post_cx: float,
+    half_w: float,
     post_cy: float,
     corner_tag: str,
     collection: bpy.types.Collection,
@@ -392,23 +392,23 @@ def _create_floor_bracket(
     """
     Create a seismic floor-mounting L-bracket at one rack corner post.
 
-    Represents a standard steel angle bracket: a vertical plate bolted to the
-    outer face of the corner post, plus a horizontal floor flange that sits on
-    the raised floor tile and accepts anchor bolts.
+    Represents a standard steel angle bracket: a vertical plate bolted flush
+    against the cabinet outer face (at ±half_w), plus a horizontal floor flange
+    that sits on the raised floor tile and accepts anchor bolts.
 
     corner_tag: "FL"|"FR"|"RL"|"RR" (Front-Left / Front-Right / Rear-Left / Rear-Right)
-    post_cx, post_cy: world XY centre of the post this bracket attaches to
+    half_w:     half the cabinet external width (w / 2) — bracket inner face is flush here
+    post_cy:    Y centre of the bracket (aligned with the corner post)
     """
     objs: List[bpy.types.Object] = []
 
     sign_x = -1 if corner_tag.endswith("L") else +1
-    post_half = RACK_POST_SIZE_M / 2
 
-    # Vertical plate — sits flush against the outer X face of the post,
+    # Vertical plate — inner face flush with cabinet outer face (±half_w),
     # runs 40 mm along Y (spanning post face width), 80 mm tall
     vert = _create_box_object(
         f"{name_prefix}_vert",
-        cx=post_cx + sign_x * (post_half + FLOOR_BRACKET_VERT_T_M / 2),
+        cx=sign_x * (half_w + FLOOR_BRACKET_VERT_T_M / 2),
         cy=post_cy,
         cz=FLOOR_BRACKET_VERT_H_M / 2,
         w=FLOOR_BRACKET_VERT_T_M,
@@ -418,11 +418,11 @@ def _create_floor_bracket(
     )
     objs.append(vert)
 
-    # Horizontal floor flange — extends outward in X from the post corner,
+    # Horizontal floor flange — extends outward in X from the cabinet face,
     # lies flat on the floor, accepts anchor bolts
     flange = _create_box_object(
         f"{name_prefix}_flange",
-        cx=post_cx + sign_x * (post_half + FLOOR_BRACKET_FLANGE_L_M / 2),
+        cx=sign_x * (half_w + FLOOR_BRACKET_FLANGE_L_M / 2),
         cy=post_cy,
         cz=FLOOR_BRACKET_FLANGE_T_M / 2,
         w=FLOOR_BRACKET_FLANGE_L_M,
@@ -544,6 +544,8 @@ def create_rack_cabinet(
     include_fan_tray: bool = True,
     include_crossbars: bool = True,
     include_rear_panel: bool = False,
+    bracket_left: bool = True,
+    bracket_right: bool = True,
     join_mesh: bool = True,
     eia_holes: bool = True,
     lod_rails: bool = True,
@@ -571,7 +573,12 @@ def create_rack_cabinet(
     sheet_thickness_mm: Panel sheet metal thickness in mm (default 1.5)
     include_side_panels: Add left/right side panels
     include_top_panel:   Add top cap panel
-    include_base:        Add floor-mounting L-brackets at each corner post
+    include_base:        Add floor-mounting L-brackets (controlled per-side by bracket_left/right)
+    bracket_left:        Include floor brackets on the left (−X) side (default True).
+                         Set False for racks that have a neighbour on their left — brackets
+                         only belong on exposed end faces, not between adjacent cabinets.
+    bracket_right:       Include floor brackets on the right (+X) side (default True).
+                         Set False for racks that have a neighbour on their right.
     include_door_mounts: Add hinge pin stubs and latch receivers on front and rear faces
     include_fan_tray:    Add 1U exhaust fan tray (2×2 fans) at top of rail zone
     include_crossbars:   Add structural side crossbars (front-to-back on each side, at 1/3 and 2/3 height)
@@ -648,17 +655,23 @@ def create_rack_cabinet(
 
     # ── Floor-mounting L-brackets ──────────────────────────────────────────
     # Part of the enclosure shell (not the open-frame skeleton).
+    # Only placed on exposed sides: bracket_left controls −X, bracket_right +X.
+    # Interior racks in a row should have both suppressed on their shared faces.
     if include_base:
         bracket_configs = [
-            ("FL", -post_cx, post_cy_f),
-            ("FR",  post_cx, post_cy_f),
-            ("RL", -post_cx, post_cy_r),
-            ("RR",  post_cx, post_cy_r),
+            ("FL", post_cy_f),
+            ("FR", post_cy_f),
+            ("RL", post_cy_r),
+            ("RR", post_cy_r),
         ]
-        for tag, bcx, bcy in bracket_configs:
+        for tag, bcy in bracket_configs:
+            if tag.endswith("L") and not bracket_left:
+                continue
+            if tag.endswith("R") and not bracket_right:
+                continue
             bracket_parts = _create_floor_bracket(
                 name_prefix=f"{col_name}_bracket_{tag}",
-                post_cx=bcx,
+                half_w=w / 2,
                 post_cy=bcy,
                 corner_tag=tag,
                 collection=col,
@@ -1483,6 +1496,8 @@ def create_rack_row(
             u_height=u_height,
             width_mm=width_mm,
             depth_mm=depth_mm,
+            bracket_left=(i == 0),
+            bracket_right=(i == count - 1),
         )
         col_name = result["collection"]
         col = bpy.data.collections.get(col_name)

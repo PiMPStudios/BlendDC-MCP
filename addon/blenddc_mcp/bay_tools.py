@@ -152,6 +152,8 @@ def create_rack_row(
             u_height=u_height,
             width_mm=width_mm,
             depth_mm=depth_mm,
+            bracket_left=(i == 0),
+            bracket_right=(i == rack_count - 1),
         )
 
         rack_col = bpy.data.collections.get(rack_name)
