@@ -1464,7 +1464,7 @@ def create_rack_row(
     u_height: int = 42,
     width_mm: float = 600.0,
     depth_mm: float = 1000.0,
-    gap_mm: float = 50.0,
+    gap_mm: float = 0.0,
     axis: str = "X",
 ) -> Dict[str, Any]:
     """
