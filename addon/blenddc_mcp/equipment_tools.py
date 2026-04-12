@@ -146,23 +146,27 @@ def create_server_chassis(
     random_variation: bool = False,
 ) -> Dict[str, Any]:
     """
-    Create a parametric server chassis blank for rack population.
+    Create a parametric server chassis with detailed front bezel geometry.
 
-    Generates a chassis body sized to u_size × EIA span × depth_mm, an inset
-    bezel face, a drive bay grid (rectangular inset tiles — no Booleans), a
-    status LED, and a power button. SOCKET_ empties are added at the rear for
-    UE5 cable endpoint attachment.
+    Builds a chassis body sized to u_size × EIA span × depth_mm, a proud bezel
+    frame (top/bottom strips + right control panel), drive bay surrounds with
+    eject handles, EIA mounting ears with screw slots, side ventilation louvres,
+    and a rear exhaust tile grille. SOCKET_ empties at rear for UE5 cable routing.
 
-    Origin is placed at front-face-bottom-centre (0, 0, 0) to align with
-    snap_to_rack_u. Equipment depth runs from Y=0 (front face) to Y=depth_mm/1000.
+    Depth illusion is achieved through proud geometry (negative-Y boxes sticking
+    out from the chassis face) that casts shadows on the chassis surface between
+    them — no Booleans required.
+
+    Origin: front-face-bottom-centre (0, 0, 0). Equipment depth: Y=0 (front) to
+    Y=depth_mm/1000 (rear).
 
     name:             base name for all objects
     u_size:           rack unit height (1, 2, or 4)
     depth_mm:         chassis depth in mm (default 700)
-    drive_bays:       number of drive bay tiles on bezel (0–8)
+    drive_bays:       number of drive bay assemblies on bezel (0–8)
     data_ports:       number of rear SOCKET_Data empties
     collection_name:  Blender collection to add objects to
-    random_variation: slightly randomize bay/LED positions for visual variety
+    random_variation: slightly randomize bay/LED positions and counts
     """
     h  = u_size * RACK_U_M
     w  = EIA_RAIL_SPAN_M
@@ -180,57 +184,206 @@ def create_server_chassis(
     )
     parts.append(chassis)
 
-    # ── Bezel (thin front face, slightly inset) ────────────────────────────
-    bezel_inset = 0.003
-    bezel = _create_box_object(
-        f"{name}_bezel",
-        cx=0.0, cy=st / 2 + bezel_inset, cz=h / 2,
-        w=w - 0.008, d=st, h=h - 0.003,
+    # ── Bezel frame strips (proud of chassis face — negative y) ───────────
+    # Origin is front-face-bottom-centre: y=0 is the front face, negative y
+    # is proud (toward the aisle), positive y goes into the chassis.
+    bz_y = -st / 2   # centre 1 mm proud of face
+    bz_d = st         # 2 mm deep
+
+    # Top border strip
+    bz_top = _create_box_object(
+        f"{name}_bz_top",
+        cx=0.0, cy=bz_y, cz=h - h * 0.08,
+        w=w - 0.006, d=bz_d, h=h * 0.12,
         collection=col,
     )
-    parts.append(bezel)
+    parts.append(bz_top)
 
-    # ── Drive bay grid (rectangular inset tiles, left 55% of bezel) ───────
+    # Bottom border strip
+    bz_bot = _create_box_object(
+        f"{name}_bz_bot",
+        cx=0.0, cy=bz_y, cz=h * 0.08,
+        w=w - 0.006, d=bz_d, h=h * 0.12,
+        collection=col,
+    )
+    parts.append(bz_bot)
+
+    # Right panel (LED / controls area — rightmost 14% of width)
+    bz_right = _create_box_object(
+        f"{name}_bz_right",
+        cx=w * 0.39, cy=bz_y, cz=h / 2,
+        w=w * 0.14, d=bz_d, h=h - 0.004,
+        collection=col,
+    )
+    parts.append(bz_right)
+
+    # ── Drive bay assemblies (left 58% of bezel face) ─────────────────────
     actual_bays = drive_bays
     if random_variation and drive_bays > 1:
         actual_bays = max(1, drive_bays + _random.randint(-1, 1))
 
-    if actual_bays > 0:
-        bay_w       = (w * 0.55) / actual_bays
-        bay_h       = h * 0.55
-        bay_depth   = 0.004
-        bay_x_start = -(w * 0.55) / 2 + bay_w / 2
-        for i in range(actual_bays):
-            bx = _jitter(bay_x_start + i * bay_w, 0.001, random_variation)
-            bz = _jitter(h / 2,                   0.001, random_variation)
-            bay = _create_box_object(
-                f"{name}_bay_{i:02d}",
-                cx=bx, cy=bay_depth / 2, cz=bz,
-                w=bay_w * 0.85, d=bay_depth, h=bay_h * 0.80,
+    bay_area_w = w * 0.58
+    bay_x0     = -(w * 0.5) + bay_area_w / 2 - 0.01
+
+    for i in range(actual_bays):
+        bx = bay_x0 - bay_area_w / 2 + (bay_area_w / actual_bays) * (i + 0.5)
+        bx = _jitter(bx, 0.001, random_variation)
+        bay_w_single = (bay_area_w / actual_bays) - 0.002
+        bay_h_dim    = h * 0.62
+        bay_cz       = h / 2
+
+        # Bay outer surround — 8mm deep housing for sled depth illusion
+        bay_hsg = _create_box_object(
+            f"{name}_bay_hsg_{i:02d}",
+            cx=bx, cy=-0.004, cz=bay_cz,
+            w=bay_w_single, d=0.008, h=bay_h_dim,
+            collection=col,
+        )
+        parts.append(bay_hsg)
+
+        # Bay inner tray face — 2mm recessed inside housing, reads as sled face
+        bay_tray = _create_box_object(
+            f"{name}_bay_tray_{i:02d}",
+            cx=bx, cy=-0.003, cz=bay_cz,
+            w=bay_w_single * 0.84, d=0.004, h=bay_h_dim * 0.80,
+            collection=col,
+        )
+        parts.append(bay_tray)
+
+        # Drive eject handle — tab at bottom of bay housing
+        bay_hdl = _create_box_object(
+            f"{name}_bay_hdl_{i:02d}",
+            cx=bx, cy=-0.007, cz=bay_cz - bay_h_dim * 0.40,
+            w=bay_w_single * 0.50, d=0.003, h=h * 0.050,
+            collection=col,
+        )
+        parts.append(bay_hdl)
+
+    # ── Top cable management lip ──────────────────────────────────────────
+    # Thin horizontal channel at top edge — mounting point for cable arms
+    cable_lip = _create_box_object(
+        f"{name}_cable_lip",
+        cx=0.0, cy=-0.002, cz=h - 0.003,
+        w=w - 0.008, d=0.005, h=0.004,
+        collection=col,
+    )
+    parts.append(cable_lip)
+
+    # ── Mounting ears (EIA brackets at left and right of front face) ───────
+    ear_w = 0.014   # 14 mm flange width
+    ear_d = 0.007   # 7 mm deep
+    ear_h = h * 0.68
+
+    for side_sign in (-1, 1):
+        side_label = 'L' if side_sign < 0 else 'R'
+        ear_cx = side_sign * (w / 2 + ear_w / 2)
+
+        ear_plate = _create_box_object(
+            f"{name}_ear_{side_label}",
+            cx=ear_cx, cy=-0.001 + ear_d / 2, cz=h / 2,
+            w=ear_w, d=ear_d, h=ear_h,
+            collection=col,
+        )
+        parts.append(ear_plate)
+
+        # Screw slot — raised indicator, slightly proud
+        ear_slot = _create_box_object(
+            f"{name}_ear_slot_{side_label}",
+            cx=ear_cx, cy=-0.0015, cz=h * 0.50,
+            w=ear_w * 0.30, d=0.001, h=h * 0.22,
+            collection=col,
+        )
+        parts.append(ear_slot)
+
+    # ── Side ventilation slots (horizontal louvre strips) ─────────────────
+    vent_count  = 4 if u_size == 1 else 6
+    vent_h_dim  = max(0.003, h * 0.038)
+    vent_d_len  = d * 0.55
+    vent_cy     = d * 0.25 + vent_d_len / 2
+    vent_z_start = h * 0.18
+    vent_z_span  = h * 0.64
+    vent_thick  = 0.0025
+
+    for side_sign in (-1, 1):
+        side_label = 'L' if side_sign < 0 else 'R'
+        vent_cx = side_sign * (w / 2 + vent_thick / 2)
+        denom = vent_count - 1 if vent_count > 1 else 1
+        for i in range(vent_count):
+            vz = _jitter(vent_z_start + i * (vent_z_span / denom), 0.001, random_variation)
+            vent = _create_box_object(
+                f"{name}_vent_{side_label}_{i}",
+                cx=vent_cx, cy=vent_cy, cz=vz,
+                w=vent_thick, d=vent_d_len, h=vent_h_dim,
                 collection=col,
             )
-            parts.append(bay)
+            parts.append(vent)
 
-    # ── Status LED ─────────────────────────────────────────────────────────
-    led_x = _jitter(w * 0.42, 0.003, random_variation)
-    led_z = _jitter(h * 0.50, 0.005, random_variation)
+    # ── Status LED (proud of right panel) ─────────────────────────────────
+    led_x = _jitter(w * 0.41, 0.003, random_variation)
+    led_z = _jitter(h * 0.65, 0.005, random_variation)
     led = _create_box_object(
         f"{name}_led",
-        cx=led_x, cy=st / 2 + bezel_inset + 0.001, cz=led_z,
-        w=0.004, d=0.002, h=0.004, collection=col,
+        cx=led_x, cy=-0.003, cz=led_z,
+        w=0.005, d=0.003, h=0.005,
+        collection=col,
     )
     parts.append(led)
 
-    # ── Power button ───────────────────────────────────────────────────────
+    # ── Power button (proud of right panel) ───────────────────────────────
+    btn_z = _jitter(h * 0.35, 0.004, random_variation)
     btn = _create_box_object(
-        f"{name}_pwr_btn",
-        cx=w * 0.45, cy=st / 2 + bezel_inset + 0.001, cz=h * 0.50,
-        w=0.008, d=0.002, h=0.008, collection=col,
+        f"{name}_pwr",
+        cx=w * 0.43, cy=-0.003, cz=btn_z,
+        w=0.009, d=0.003, h=0.009,
+        collection=col,
     )
     parts.append(btn)
 
+    # ── Rear exhaust grille (raised tile grid on rear face) ────────────────
+    grille_rows = 3 if u_size == 1 else 4
+    grille_cols = 8
+    grille_w    = w * 0.52
+    grille_h    = h * 0.52
+    tile_w      = (grille_w / grille_cols) * 0.58
+    tile_h      = (grille_h / grille_rows) * 0.58
+    tile_d      = 0.0015
+
+    for row in range(grille_rows):
+        for col_i in range(grille_cols):
+            gx = -grille_w / 2 + (col_i + 0.5) * (grille_w / grille_cols)
+            gz = (h - grille_h) / 2 + (row + 0.5) * (grille_h / grille_rows)
+            tile = _create_box_object(
+                f"{name}_exh_{row}_{col_i}",
+                cx=gx, cy=d + tile_d / 2, cz=gz,
+                w=tile_w, d=tile_d, h=tile_h,
+                collection=col,
+            )
+            parts.append(tile)
+
     # ── Join + origin ──────────────────────────────────────────────────────
     joined = _join_parts(parts, name)
+
+    # ── Per-server material variation ─────────────────────────────────────
+    # When random_variation is on, each chassis gets a unique Principled BSDF
+    # with slightly different base colour, roughness, and metallic so no two
+    # adjacent servers look identical in a populated rack.
+    if random_variation:
+        _var_mat = bpy.data.materials.new(f"{name}_var")
+        _var_mat.use_nodes = True
+        _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
+        if _var_bsdf:
+            _base = 0.07 + _random.uniform(-0.018, 0.022)
+            _var_bsdf.inputs["Base Color"].default_value = (
+                max(0.03, _base + _random.uniform(-0.008, 0.008)),
+                max(0.03, _base + _random.uniform(-0.008, 0.008)),
+                max(0.03, _base + _random.uniform(-0.008, 0.012)),
+                1.0,
+            )
+            _var_bsdf.inputs["Roughness"].default_value = max(0.35, min(0.75,
+                0.50 + _random.uniform(-0.10, 0.15)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.50, min(0.85,
+                0.70 + _random.uniform(-0.10, 0.08)))
+        joined.data.materials.append(_var_mat)
 
     # ── SOCKET_ empties parented to joined chassis ─────────────────────────
     sockets_created: List[str] = []
@@ -279,27 +432,33 @@ def create_network_switch(
     random_variation: bool = False,
 ) -> Dict[str, Any]:
     """
-    Create a 1U/2U network switch blank for rack population.
+    Create a 1U/2U network switch with detailed front-face geometry.
 
-    Generates a chassis body, front-face port array (rectangular inset tiles
-    arranged in rows of 24), side ventilation slot geometry, and SOCKET_
-    empties for uplink ports and rear power.
+    Builds a chassis, proud bezel frame (top/bottom strips + right control
+    panel), port clusters with group dividers, a status LED strip above ports,
+    SFP uplink ports, management port, EIA mounting ears with screw slots,
+    side ventilation louvres on both sides, and a rear exhaust tile grille.
+
+    Depth illusion via proud geometry (negative-Y): bezel strips, port tiles,
+    and LED bumps all project toward the aisle so directional light creates
+    visible layering without Boolean cuts.
 
     name:             base name
     u_size:           rack unit height (1 or 2)
-    port_count:       number of front-face port tiles (24 or 48)
+    port_count:       front-face data ports (24 or 48)
     collection_name:  Blender collection
-    random_variation: slightly randomize port/vent position for visual variety
+    random_variation: randomize LED/port positions and per-unit material
     """
     h  = u_size * RACK_U_M
     w  = EIA_RAIL_SPAN_M
-    d  = 0.300           # switches are shallower than servers
+    d  = 0.300
     st = RACK_SHEET_THICK_M
 
     col   = _get_or_create_collection(collection_name)
     parts: List[bpy.types.Object] = []
+    rv    = random_variation
 
-    # Chassis
+    # ── Chassis body ──────────────────────────────────────────────────────
     chassis = _create_box_object(
         f"{name}_chassis",
         cx=0.0, cy=d / 2, cz=h / 2,
@@ -307,63 +466,210 @@ def create_network_switch(
     )
     parts.append(chassis)
 
-    # Bezel
-    bezel = _create_box_object(
-        f"{name}_bezel",
-        cx=0.0, cy=st / 2 + 0.002, cz=h / 2,
-        w=w - 0.008, d=st, h=h - 0.003, collection=col,
-    )
-    parts.append(bezel)
+    # ── Bezel frame strips (proud — negative y) ───────────────────────────
+    bz_y = -st / 2
+    bz_d = st
 
-    # ── Port array — rows of 24 ────────────────────────────────────────────
-    ports_per_row = 24
-    rows    = max(1, (port_count + ports_per_row - 1) // ports_per_row)
-    port_w  = (w * 0.80) / ports_per_row
-    port_h  = (h * 0.55) / rows
-    port_d  = 0.003
+    bz_top = _create_box_object(
+        f"{name}_bz_top",
+        cx=0.0, cy=bz_y, cz=h - h * 0.10,
+        w=w - 0.006, d=bz_d, h=h * 0.16,
+        collection=col,
+    )
+    parts.append(bz_top)
+
+    bz_bot = _create_box_object(
+        f"{name}_bz_bot",
+        cx=0.0, cy=bz_y, cz=h * 0.10,
+        w=w - 0.006, d=bz_d, h=h * 0.16,
+        collection=col,
+    )
+    parts.append(bz_bot)
+
+    # Right control panel — SFP uplinks, mgmt port, power LED
+    bz_right = _create_box_object(
+        f"{name}_bz_right",
+        cx=w * 0.40, cy=bz_y, cz=h / 2,
+        w=w * 0.14, d=bz_d, h=h - 0.004,
+        collection=col,
+    )
+    parts.append(bz_right)
+
+    # ── Port clusters (left 74% of face) ─────────────────────────────────
+    ports_per_row = min(port_count, 24)
+    rows          = max(1, (port_count + ports_per_row - 1) // ports_per_row)
+    port_area_w   = w * 0.74
+    port_area_h   = h * 0.46
+    port_w        = port_area_w / ports_per_row
+    port_h        = port_area_h / rows
+    port_cz_base  = h * 0.28
 
     for row in range(rows):
         for p in range(ports_per_row):
-            px = -(w * 0.80 / 2) + p * port_w + port_w / 2
-            pz = h * 0.22 + row * (port_h + 0.002)
-            px = _jitter(px, 0.0005, random_variation)
-            pz = _jitter(pz, 0.0005, random_variation)
+            idx = row * ports_per_row + p
+            if idx >= port_count:
+                break
+            px = -(port_area_w / 2) + p * port_w + port_w / 2
+            pz = port_cz_base + row * (port_h + 0.002)
+            px = _jitter(px, 0.0003, rv)
+            pz = _jitter(pz, 0.0003, rv)
             port = _create_box_object(
                 f"{name}_port_{row}_{p:02d}",
-                cx=px, cy=port_d / 2, cz=pz,
-                w=port_w * 0.75, d=port_d, h=port_h * 0.75,
+                cx=px, cy=-0.002, cz=pz,
+                w=port_w * 0.65, d=0.004, h=port_h * 0.72,
                 collection=col,
             )
             parts.append(port)
 
-    # ── Side ventilation slots (left exterior face) ────────────────────────
-    vent_count   = 6
-    vent_spacing = d / (vent_count + 1)
-    for i in range(vent_count):
-        vy = vent_spacing * (i + 1)
-        vy = _jitter(vy, 0.003, random_variation)
-        vslot = _create_box_object(
-            f"{name}_vent_{i}",
-            cx=-(w / 2 - st * 0.5),
-            cy=vy, cz=h / 2,
-            w=st * 0.5, d=0.002, h=h * 0.60,
+    # ── Port group dividers ────────────────────────────────────────────────
+    group_size = 12 if port_count >= 48 else 8
+    num_groups = ports_per_row // group_size
+    for g in range(1, num_groups):
+        sep_x = -(port_area_w / 2) + g * group_size * port_w
+        sep = _create_box_object(
+            f"{name}_sep_{g}",
+            cx=sep_x, cy=-0.0015, cz=h * 0.50,
+            w=0.002, d=0.004, h=h * 0.72,
             collection=col,
         )
-        parts.append(vslot)
+        parts.append(sep)
 
-    # Management port indicator (right of bezel)
+    # ── Status LED strip (bumps above port area) ──────────────────────────
+    led_count  = min(ports_per_row, 12)
+    led_area_w = port_area_w * 0.95
+    led_step   = led_area_w / led_count
+    led_row_z  = port_cz_base + rows * (port_h + 0.002) + h * 0.04
+    for i in range(led_count):
+        lx = -(led_area_w / 2) + i * led_step + led_step / 2
+        lx = _jitter(lx, 0.001, rv)
+        lz = _jitter(led_row_z, 0.001, rv)
+        led = _create_box_object(
+            f"{name}_led_{i:02d}",
+            cx=lx, cy=-0.003, cz=lz,
+            w=0.005, d=0.003, h=0.004,
+            collection=col,
+        )
+        parts.append(led)
+
+    # ── SFP / uplink ports (4 taller slots on right control panel) ────────
+    sfp_base_x = w * 0.38
+    sfp_w      = 0.011
+    sfp_h      = h * 0.34
+    for i in range(4):
+        sx = sfp_base_x - i * (sfp_w + 0.003)
+        sfp = _create_box_object(
+            f"{name}_sfp_{i}",
+            cx=sx, cy=-0.002, cz=h * 0.60,
+            w=sfp_w, d=0.005, h=sfp_h,
+            collection=col,
+        )
+        parts.append(sfp)
+
+    # ── Management / console port + power indicator ───────────────────────
     mgmt = _create_box_object(
         f"{name}_mgmt",
-        cx=w * 0.42, cy=st / 2 + 0.003, cz=h * 0.50,
-        w=0.012, d=0.002, h=0.008, collection=col,
+        cx=w * 0.43, cy=-0.002, cz=h * 0.28,
+        w=0.010, d=0.004, h=0.008, collection=col,
     )
     parts.append(mgmt)
 
+    pwr_led = _create_box_object(
+        f"{name}_pwr_led",
+        cx=_jitter(w * 0.44, 0.002, rv), cy=-0.003,
+        cz=_jitter(h * 0.15, 0.003, rv),
+        w=0.006, d=0.003, h=0.006, collection=col,
+    )
+    parts.append(pwr_led)
+
+    # ── Mounting ears L+R ─────────────────────────────────────────────────
+    ear_w = 0.014
+    ear_d = 0.007
+    ear_h = h * 0.68
+    for side_sign in (-1, 1):
+        side_label = 'L' if side_sign < 0 else 'R'
+        ear_cx = side_sign * (w / 2 + ear_w / 2)
+        ear_plate = _create_box_object(
+            f"{name}_ear_{side_label}",
+            cx=ear_cx, cy=-0.001 + ear_d / 2, cz=h / 2,
+            w=ear_w, d=ear_d, h=ear_h,
+            collection=col,
+        )
+        parts.append(ear_plate)
+        ear_slot = _create_box_object(
+            f"{name}_ear_slot_{side_label}",
+            cx=ear_cx, cy=-0.0015, cz=h * 0.50,
+            w=ear_w * 0.30, d=0.001, h=h * 0.22,
+            collection=col,
+        )
+        parts.append(ear_slot)
+
+    # ── Side ventilation slots (both sides) ───────────────────────────────
+    vent_count   = 4 if u_size == 1 else 6
+    vent_h_dim   = max(0.003, h * 0.040)
+    vent_d_len   = d * 0.55
+    vent_cy      = d * 0.30 + vent_d_len / 2
+    vent_z_start = h * 0.20
+    vent_z_span  = h * 0.60
+    vent_thick   = 0.0025
+    v_denom      = vent_count - 1 if vent_count > 1 else 1
+    for side_sign in (-1, 1):
+        side_label = 'L' if side_sign < 0 else 'R'
+        vent_cx = side_sign * (w / 2 + vent_thick / 2)
+        for i in range(vent_count):
+            vz = _jitter(vent_z_start + i * (vent_z_span / v_denom), 0.001, rv)
+            vent = _create_box_object(
+                f"{name}_vent_{side_label}_{i}",
+                cx=vent_cx, cy=vent_cy, cz=vz,
+                w=vent_thick, d=vent_d_len, h=vent_h_dim,
+                collection=col,
+            )
+            parts.append(vent)
+
+    # ── Rear exhaust tile grille ───────────────────────────────────────────
+    ex_rows = 2 if u_size == 1 else 3
+    ex_cols = 6
+    ex_w    = w * 0.48
+    ex_h    = h * 0.50
+    t_w     = (ex_w / ex_cols) * 0.58
+    t_h     = (ex_h / ex_rows) * 0.58
+    t_d     = 0.0015
+    for row in range(ex_rows):
+        for ci in range(ex_cols):
+            gx = -ex_w / 2 + (ci + 0.5) * (ex_w / ex_cols)
+            gz = (h - ex_h) / 2 + (row + 0.5) * (ex_h / ex_rows)
+            tile = _create_box_object(
+                f"{name}_exh_{row}_{ci}",
+                cx=gx, cy=d + t_d / 2, cz=gz,
+                w=t_w, d=t_d, h=t_h, collection=col,
+            )
+            parts.append(tile)
+
+    # ── Join + origin ─────────────────────────────────────────────────────
     joined = _join_parts(parts, name)
 
+    # ── Per-switch material variation ─────────────────────────────────────
+    if random_variation:
+        _var_mat = bpy.data.materials.new(f"{name}_var")
+        _var_mat.use_nodes = True
+        _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
+        if _var_bsdf:
+            _base = 0.05 + _random.uniform(-0.015, 0.020)
+            _var_bsdf.inputs["Base Color"].default_value = (
+                max(0.03, _base + _random.uniform(-0.008, 0.008)),
+                max(0.03, _base + _random.uniform(-0.008, 0.008)),
+                max(0.03, _base + _random.uniform(-0.008, 0.015)),
+                1.0,
+            )
+            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.70,
+                0.45 + _random.uniform(-0.10, 0.15)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
+                0.65 + _random.uniform(-0.10, 0.08)))
+        joined.data.materials.append(_var_mat)
+
+    # ── SOCKET_ empties ────────────────────────────────────────────────────
     sockets_created: List[str] = []
     for i in range(2):
-        ux = _jitter(w * 0.35 + i * 0.025, 0.003, random_variation)
+        ux = _jitter(w * 0.35 + i * 0.025, 0.003, rv)
         up = _add_socket_empty(
             f"{name}_Uplink_{i:02d}",
             location=(ux, 0.0, h * 0.50),
@@ -405,45 +711,77 @@ def create_patch_panel(
     random_variation: bool = False,
 ) -> Dict[str, Any]:
     """
-    Create a 1U/2U patch panel blank for rack population.
+    Create a 1U/2U patch panel with detailed front-face geometry.
 
-    Generates a panel body and a front-face port grid (rectangular inset tiles
-    in rows of 24 — no Boolean cuts). SOCKET_Port_00..N empties are placed at
-    each port for UE5 cable spawn point assignment.
+    Builds a panel body, proud bezel frame (top strip, bottom label strip,
+    right ID plate), a port grid organised in groups of 8 with vertical
+    dividers, cable management rings at the bottom, and EIA mounting ears.
+
+    Port tiles project toward the aisle (negative Y) so directional light
+    creates visible shadow relief between ports — no Boolean cuts.
 
     name:             base name
     u_size:           rack unit height (1 = 24-port, 2 = 48-port typical)
     port_count:       total number of ports to generate
     collection_name:  Blender collection
-    random_variation: slightly randomize port positions for visual variety
+    random_variation: randomize port positions and per-unit material
     """
     h  = u_size * RACK_U_M
     w  = EIA_RAIL_SPAN_M
-    d  = 0.040           # patch panels are very shallow (40 mm)
+    d  = 0.040
     st = RACK_SHEET_THICK_M
 
     col   = _get_or_create_collection(collection_name)
     parts: List[bpy.types.Object] = []
+    rv    = random_variation
 
-    # Panel body + face
+    # ── Panel body ─────────────────────────────────────────────────────────
     body = _create_box_object(
         f"{name}_body",
         cx=0.0, cy=d / 2, cz=h / 2,
         w=w, d=d, h=h, collection=col,
     )
     parts.append(body)
-    face = _create_box_object(
-        f"{name}_face",
-        cx=0.0, cy=st / 2, cz=h / 2,
-        w=w - 0.006, d=st, h=h - 0.002, collection=col,
+
+    # ── Bezel frame (proud — negative y) ──────────────────────────────────
+    bz_y = -st / 2
+    bz_d = st
+
+    # Top border strip
+    bz_top = _create_box_object(
+        f"{name}_bz_top",
+        cx=0.0, cy=bz_y, cz=h - h * 0.10,
+        w=w - 0.006, d=bz_d, h=h * 0.16,
+        collection=col,
     )
-    parts.append(face)
+    parts.append(bz_top)
+
+    # Bottom label strip (slightly taller — suggests port numbering silkscreen)
+    bz_bot = _create_box_object(
+        f"{name}_bz_bot",
+        cx=0.0, cy=bz_y, cz=h * 0.10,
+        w=w - 0.006, d=bz_d, h=h * 0.20,
+        collection=col,
+    )
+    parts.append(bz_bot)
+
+    # Right ID / label plate
+    bz_right = _create_box_object(
+        f"{name}_bz_right",
+        cx=w * 0.43, cy=bz_y, cz=h / 2,
+        w=w * 0.08, d=bz_d, h=h - 0.004,
+        collection=col,
+    )
+    parts.append(bz_right)
 
     # ── Port grid ──────────────────────────────────────────────────────────
-    ports_per_row  = min(port_count, 24)
-    rows           = max(1, (port_count + ports_per_row - 1) // ports_per_row)
-    port_w         = (w * 0.88) / ports_per_row
-    port_h         = (h * 0.60) / rows
+    ports_per_row = min(port_count, 24)
+    rows          = max(1, (port_count + ports_per_row - 1) // ports_per_row)
+    port_area_w   = w * 0.82
+    port_area_h   = h * 0.48
+    port_w        = port_area_w / ports_per_row
+    port_h        = port_area_h / rows
+    port_cz_base  = h * 0.34
     socket_specs: List[Tuple[float, float, int]] = []
 
     for row in range(rows):
@@ -451,21 +789,93 @@ def create_patch_panel(
             idx = row * ports_per_row + p
             if idx >= port_count:
                 break
-            px = -(w * 0.88 / 2) + p * port_w + port_w / 2
-            pz = h * 0.20 + row * (port_h + 0.003)
-            px = _jitter(px, 0.0005, random_variation)
-            pz = _jitter(pz, 0.0005, random_variation)
+            px = -(port_area_w / 2) + p * port_w + port_w / 2
+            pz = port_cz_base + row * (port_h + 0.002)
+            px = _jitter(px, 0.0003, rv)
+            pz = _jitter(pz, 0.0003, rv)
             port = _create_box_object(
                 f"{name}_port_{idx:02d}",
-                cx=px, cy=0.002, cz=pz,
-                w=port_w * 0.72, d=0.003, h=port_h * 0.72,
+                cx=px, cy=-0.002, cz=pz,
+                w=port_w * 0.68, d=0.004, h=port_h * 0.74,
                 collection=col,
             )
             parts.append(port)
             socket_specs.append((px, pz, idx))
 
+    # ── Port group dividers (every 8 ports) ───────────────────────────────
+    group_size = 8
+    num_groups = ports_per_row // group_size
+    for g in range(1, num_groups):
+        sep_x = -(port_area_w / 2) + g * group_size * port_w
+        sep = _create_box_object(
+            f"{name}_sep_{g}",
+            cx=sep_x, cy=-0.0015, cz=h * 0.55,
+            w=0.0015, d=0.003, h=h * 0.65,
+            collection=col,
+        )
+        parts.append(sep)
+
+    # ── Cable management rings (bottom of bezel) ──────────────────────────
+    ring_count   = 4 if port_count <= 24 else 6
+    ring_area_w  = w * 0.70
+    ring_spacing = ring_area_w / (ring_count + 1)
+    for i in range(ring_count):
+        rx = -(ring_area_w / 2) + ring_spacing * (i + 1)
+        ring = _create_box_object(
+            f"{name}_ring_{i}",
+            cx=rx, cy=-0.005, cz=h * 0.11,
+            w=0.011, d=0.004, h=0.008,
+            collection=col,
+        )
+        parts.append(ring)
+
+    # ── Mounting ears L+R ─────────────────────────────────────────────────
+    ear_w = 0.014
+    ear_d = 0.007
+    ear_h = h * 0.70
+    for side_sign in (-1, 1):
+        side_label = 'L' if side_sign < 0 else 'R'
+        ear_cx = side_sign * (w / 2 + ear_w / 2)
+        ear_plate = _create_box_object(
+            f"{name}_ear_{side_label}",
+            cx=ear_cx, cy=-0.001 + ear_d / 2, cz=h / 2,
+            w=ear_w, d=ear_d, h=ear_h,
+            collection=col,
+        )
+        parts.append(ear_plate)
+        ear_slot = _create_box_object(
+            f"{name}_ear_slot_{side_label}",
+            cx=ear_cx, cy=-0.0015, cz=h * 0.50,
+            w=ear_w * 0.30, d=0.001, h=h * 0.25,
+            collection=col,
+        )
+        parts.append(ear_slot)
+
+    # ── Join + origin ──────────────────────────────────────────────────────
     joined = _join_parts(parts, name)
 
+    # ── Per-panel material variation ──────────────────────────────────────
+    # Patch panels are typically lighter than servers (grey/silver anodised).
+    # Variation shifts colour temperature and sheen so adjacent panels differ.
+    if random_variation:
+        _var_mat = bpy.data.materials.new(f"{name}_var")
+        _var_mat.use_nodes = True
+        _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
+        if _var_bsdf:
+            _base = 0.68 + _random.uniform(-0.06, 0.10)
+            _var_bsdf.inputs["Base Color"].default_value = (
+                max(0.50, _base + _random.uniform(-0.03, 0.03)),
+                max(0.50, _base + _random.uniform(-0.03, 0.03)),
+                max(0.50, _base + _random.uniform(-0.03, 0.06)),
+                1.0,
+            )
+            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.65,
+                0.42 + _random.uniform(-0.10, 0.15)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
+                0.60 + _random.uniform(-0.10, 0.10)))
+        joined.data.materials.append(_var_mat)
+
+    # ── SOCKET_ empties ────────────────────────────────────────────────────
     sockets_created: List[str] = []
     for (px, pz, idx) in socket_specs:
         s = _add_socket_empty(
@@ -764,9 +1174,17 @@ def populate_rack_from_json(
 
     bh             = col["rack_base_height_m"]
     u_height       = col["rack_u_height"]
-    ps_m           = col["rack_post_size_mm"] / 1000.0
-    y_front        = ps_m / 2
+    # Equipment bezel sits 2 mm behind the cabinet front face (Y=0 in rack-local
+    # space). This gives realistic door-clearance without the bezel protruding into
+    # the aisle. Do NOT use ps_m/2 — that puts the bezel inside the front posts.
+    y_front        = 0.002
     equip_col_name = f"{rack_col_name}_Equipment"
+
+    # Rack world transform — used to convert rack-local positions to world space.
+    # Handles racks at any world XYZ and any Z rotation (including 180° for Row B).
+    _rack_body  = bpy.data.objects.get(f"{rack_col_name}_Body")
+    _rack_mat   = _rack_body.matrix_world.copy() if _rack_body else mathutils.Matrix.Identity(4)
+    _rack_rot_z = _rack_body.rotation_euler.z if _rack_body else 0.0
 
     placed:  List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -816,9 +1234,9 @@ def populate_rack_from_json(
 
             eq_obj = bpy.data.objects.get(eq_name)
             if eq_obj:
-                eq_obj.location.x = 0.0
-                eq_obj.location.y = y_front
-                eq_obj.location.z = z_bottom
+                local_pos = mathutils.Vector((0.0, y_front, z_bottom))
+                eq_obj.location = _rack_mat @ local_pos
+                eq_obj.rotation_euler.z = _rack_rot_z
 
             placed.append({
                 "name":       eq_name,
@@ -881,11 +1299,16 @@ def populate_rack_procedural(
 
     u_height   = col["rack_u_height"]
     bh         = col["rack_base_height_m"]
-    ps_m       = col["rack_post_size_mm"] / 1000.0
-    y_front    = ps_m / 2
+    # Equipment bezel 2 mm behind cabinet front face — see populate_rack_from_json.
+    y_front    = 0.002
     actual_end = end_u if end_u > 0 else u_height
 
     equip_col_name = f"{collection_name}_Equipment"
+
+    # Rack world transform for local → world positioning.
+    _rack_body  = bpy.data.objects.get(f"{collection_name}_Body")
+    _rack_mat   = _rack_body.matrix_world.copy() if _rack_body else mathutils.Matrix.Identity(4)
+    _rack_rot_z = _rack_body.rotation_euler.z if _rack_body else 0.0
 
     # ── Build placement sequence ───────────────────────────────────────────
     # Each entry: (u_size, eq_type, extra_kwargs)
@@ -946,9 +1369,9 @@ def populate_rack_procedural(
 
             eq_obj = bpy.data.objects.get(eq_name)
             if eq_obj:
-                eq_obj.location.x = 0.0
-                eq_obj.location.y = y_front
-                eq_obj.location.z = z_bottom
+                local_pos = mathutils.Vector((0.0, y_front, z_bottom))
+                eq_obj.location = _rack_mat @ local_pos
+                eq_obj.rotation_euler.z = _rack_rot_z
 
             placed.append({
                 "name":       eq_name,

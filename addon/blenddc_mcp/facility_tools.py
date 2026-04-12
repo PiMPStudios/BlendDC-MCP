@@ -254,7 +254,23 @@ def _create_raised_floor(
     tile_gap = RF_TILE_GROUT_M
     tw       = RF_TILE_W_M - tile_gap   # 596 mm
     td       = RF_TILE_D_M - tile_gap   # 596 mm
-    fw       = 0.020                    # 20 mm frame border for perforated
+
+    # Solid tiles are geometrically identical — build ONE shared mesh datablock
+    # and create lightweight instance objects (one location transform each).
+    # This eliminates O(n²) redundant mesh datablocks for hot-aisle / corridor zones.
+    # Perforated tiles keep individually-joined unique meshes so each tile can be
+    # replaced or swapped independently by downstream tools.
+    _solid_mesh: Optional[bpy.types.Mesh] = None
+    if tile_type == 'solid':
+        _solid_mesh = bpy.data.meshes.new(f"{zone_name}_solid_tile")
+        _bm_tile = bmesh.new()
+        _tile_scale = mathutils.Matrix.Diagonal(
+            (tw * 0.5, td * 0.5, RF_TILE_H_M * 0.5, 1.0)
+        )
+        bmesh.ops.create_cube(_bm_tile, size=2.0, matrix=_tile_scale)
+        _bm_tile.to_mesh(_solid_mesh)
+        _bm_tile.free()
+        _solid_mesh.update()
 
     for iy in range(ny - 1):
         for ix in range(nx - 1):
@@ -289,9 +305,12 @@ def _create_raised_floor(
 
                 _join_zone(name, bars, tiles_col)
             else:
-                _create_box_object(name, cx=tcx, cy=tcy, cz=tile_cz,
-                                   w=tw, d=td, h=RF_TILE_H_M,
-                                   collection=tiles_col)
+                # Instance the shared solid mesh — one datablock, N positioned objects.
+                # Each object has its own location but zero extra mesh memory.
+                tile_obj = bpy.data.objects.new(name, _solid_mesh)
+                tile_obj.location = (tcx, tcy, tile_cz)
+                tile_obj["tile_type"] = "solid"
+                tiles_col.objects.link(tile_obj)
 
 
 def _section_col(section_name: str) -> bpy.types.Collection:

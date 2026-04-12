@@ -143,11 +143,14 @@ def _bmesh_join(
     collection.objects.link(joined)
 
     part_meshes = [p.data for p in parts]
-    for part in parts:
-        bpy.data.objects.remove(part, do_unlink=True)
-    for m in part_meshes + tmp_meshes:
-        if m.users == 0:
-            bpy.data.meshes.remove(m)
+    try:
+        for part in parts:
+            bpy.data.objects.remove(part, do_unlink=True)
+        for m in part_meshes + tmp_meshes:
+            if m.users == 0:
+                bpy.data.meshes.remove(m)
+    except Exception:
+        pass
 
     return joined
 
@@ -553,6 +556,7 @@ def create_rack_cabinet(
     include_rear_panel: bool = False,
     join_mesh: bool = True,
     eia_holes: bool = True,
+    lod_rails: bool = True,
 ) -> Dict[str, Any]:
     """
     Generate a parametric 4-post enclosed server rack cabinet.
@@ -585,6 +589,9 @@ def create_rack_cabinet(
     join_mesh:           Join all parts into a single mesh object (default True)
     eia_holes:           Punch EIA-310 square mounting holes into rail flanges
                          (default True); set False for a solid flange (no holes)
+    lod_rails:           Also generate {name}_Rails_LOD1 — solid L-brackets with no
+                         holes for medium-distance rendering (default True).
+                         Only meaningful when join_mesh=True and eia_holes=True.
 
     Returns collection name, object list, key sockets, rack dimensions, and origin.
     """
@@ -846,8 +853,32 @@ def create_rack_cabinet(
     if join_mesh and body_objs and rail_objs:
         # Join body parts → {col_name}_Body
         _bmesh_join(col_name + "_Body", body_objs, col)
-        # Join rail parts → {col_name}_Rails
+        # Join rail parts → {col_name}_Rails  (LOD0: full EIA-310 through-holes)
         _bmesh_join(col_name + "_Rails", rail_objs, col)
+
+        # LOD1 rails: solid L-brackets, no holes — for medium-distance rendering (>5 m).
+        # EIA holes (9.5 mm sq) are invisible beyond ~4–5 m; removing them drops the
+        # rail mesh from several thousand faces to ~48 (4 rails × 2 box parts × 6 faces).
+        if lod_rails and eia_holes:
+            lod1_rail_objs: List[bpy.types.Object] = []
+            for tag, sx, rcy, fcy, web_d in rail_configs:
+                lod1_parts = _create_l_rail(
+                    name=f"{col_name}_lod1_rail_{tag}",
+                    sign_x=sx,
+                    cy=rcy,
+                    flange_cy=fcy,
+                    cz=bh + rh / 2,
+                    height=rh,
+                    rt=rt, rf=rf, ps=web_d,
+                    hs=half_span,
+                    collection=col,
+                    eia_holes=False,
+                    u_height=u_height,
+                )
+                lod1_rail_objs.append(lod1_parts["web"])
+                lod1_rail_objs.extend(lod1_parts["flange_parts"])
+            _bmesh_join(col_name + "_Rails_LOD1", lod1_rail_objs, col)
+            col["rack_has_rail_lod"] = True
 
     elif not join_mesh:
         # Each part gets origin at base-front-centre for consistent export
@@ -868,8 +899,9 @@ def create_rack_cabinet(
         "collection":     col_name,
         "objects":        final_objects,
         "joined":         join_mesh,
-        "body_object":    col_name + "_Body" if join_mesh else None,
-        "rails_object":   col_name + "_Rails" if join_mesh else None,
+        "body_object":       col_name + "_Body" if join_mesh else None,
+        "rails_object":      col_name + "_Rails" if join_mesh else None,
+        "rails_lod1_object": col_name + "_Rails_LOD1" if (join_mesh and lod_rails and eia_holes) else None,
         "sockets":        sockets,
         "u_height":       u_height,
         "external_dimensions_mm": {
@@ -927,7 +959,11 @@ def get_rack_u_position(
     slot_z_top    = slot_z_bottom + RACK_U_M
     slot_z_centre = (slot_z_bottom + slot_z_top) / 2
 
-    y = ps_m / 2 if side.lower() == "front" else depth_m - ps_m / 2
+    # Equipment bezel sits 2 mm behind the cabinet front face (Y=0 in rack-local
+    # space). Rear equipment mounts 2 mm ahead of the rear face. These are
+    # rack-LOCAL positions — callers must apply the rack's matrix_world to
+    # convert to world space (see snap_to_rack_u).
+    y = 0.002 if side.lower() == "front" else depth_m - 0.002
 
     return {
         "collection":    collection_name,
@@ -1041,9 +1077,17 @@ def snap_to_rack_u(
     z_bot  = bh + (u_slot - 1) * RACK_U_M
     z_ctr  = z_bot + (u_size * RACK_U_M) / 2
 
-    obj.location.x = x_offset
-    obj.location.y = pos["centre"][1]
-    obj.location.z = z_ctr
+    # Convert rack-local position to world space using the rack Body's matrix_world.
+    # This handles racks at any world position or Z rotation (e.g. 180° Row B).
+    rack_body = bpy.data.objects.get(f"{collection_name}_Body")
+    if rack_body:
+        local_pos = mathutils.Vector((x_offset, pos["centre"][1], z_ctr))
+        obj.location = rack_body.matrix_world @ local_pos
+        obj.rotation_euler.z = rack_body.rotation_euler.z
+    else:
+        obj.location.x = x_offset
+        obj.location.y = pos["centre"][1]
+        obj.location.z = z_ctr
 
     return {
         "object":      object_name,
@@ -1760,21 +1804,25 @@ def create_rack_door(
     name: str = "",
 ) -> Dict[str, Any]:
     """
-    Create a single door panel (front or rear) for a rack cabinet.
+    Create a detailed door panel (front or rear) for a rack cabinet.
 
-    The door is a flat sheet-metal panel sized to cover the full EIA rail
-    zone (height = RACK_INTERIOR_HEIGHT_M, width = cabinet exterior width).
-    Hinge-pin attachment points (left) and latch socket (right) are added
-    as child empties at the positions defined by HINGE_POSITIONS.
+    Builds a multi-part door joined into a single mesh: a 20 mm-deep outer
+    frame (four perimeter strips), a recessed inner panel with a ~13 mm
+    clearance pocket for server handles and cable-management rings, three
+    hinge-knuckle blocks with pin-detail nubs on the left side, and a latch
+    guard plate plus handle bar on the right side.
 
-    The door origin is placed at the bottom hinge pin so UE5 blueprint
-    door-open animations rotate around the correct pivot.
+    Door origin is at the bottom hinge pin so UE5 blueprint door-open
+    animations rotate around the correct pivot (rotate Z to open).
+
+    Clearance: the inner panel face sits ≈ 7 mm in front of the rack face
+    (front door), giving ≈ 2 mm gap beyond the 5 mm maximum handle protrusion
+    from fully-loaded server chassis. Real pocket = 20 mm.
 
     collection_name: rack collection (must have rack metadata)
     side:            'front' | 'rear'
-    vented:          if True, marks the object for vent pattern addition
-                     via add_door_vent_pattern (geometry not cut yet)
-    name:            optional object name (auto-generated if empty)
+    vented:          mark for vent-pattern GN modifier (geometry not cut yet)
+    name:            optional override for object name (auto-generated if empty)
     """
     col = bpy.data.collections.get(collection_name)
     if not col:
@@ -1790,56 +1838,171 @@ def create_rack_door(
     d   = col["rack_depth_mm"] / 1000.0
     bh  = col["rack_base_height_m"]
     rh  = col["rack_rail_height_m"]
-    st  = DOOR_SHEET_THICK_M
 
-    # Door panel covers the full exterior width and interior rail height
+    # ── Rack body world offset ────────────────────────────────────────────
+    # Door parts are created as independent scene objects then baked into
+    # a single mesh by _bmesh_join.  We must use world-space coordinates so
+    # the joined mesh lands at the rack's actual world position, not the
+    # origin.  Detect the Body object's world translation.
+    rx, ry, rz = 0.0, 0.0, 0.0
+    for _o in col.objects:
+        if _o.type == 'MESH' and _o.name.endswith('_Body'):
+            _t = _o.matrix_world.translation
+            rx, ry, rz = float(_t.x), float(_t.y), float(_t.z)
+            break
+
+    # ── Door geometry constants ───────────────────────────────────────────
+    FRAME_D      = 0.020   # total door depth from rack face to door outer face
+    FRAME_W      = 0.030   # perimeter border strip width
+    PANEL_THICK  = 0.003   # recessed panel thickness
+    HINGE_W_EXT  = 0.020   # hinge knuckle outward width (protrudes past rack edge)
+    HINGE_D      = 0.016   # hinge knuckle depth along door Y
+    HINGE_H      = 0.048   # hinge knuckle height
+    LATCH_W_EXT  = 0.022   # latch guard width
+    LATCH_H      = 0.072   # latch guard height
+    LATCH_BAR_D  = 0.014   # latch handle bar protrusion beyond door outer face
+
     panel_name = name or f"{collection_name}_door_{side}"
+    parts: List[bpy.types.Object] = []
 
-    # Y position: front door sits flush with front face (Y=0), rear at Y=d
-    if side == "front":
-        cy = -(st / 2)              # protrudes slightly forward of Y=0
-    else:
-        cy = d + st / 2             # protrudes slightly behind Y=d
+    # sign: -1 for front (aisle = -Y), +1 for rear (aisle = +Y)
+    sign        = -1 if side == "front" else +1
+    rack_face_y = 0.0 if side == "front" else d
 
-    panel = _create_box_object(
-        panel_name,
-        cx=0.0,
-        cy=cy,
-        cz=bh + rh / 2,
-        w=w,
-        d=st,
-        h=rh,
+    # Door Y reference positions (all in rack-local space)
+    cy_frame = rack_face_y + sign * (FRAME_D / 2)
+    cy_panel = rack_face_y + sign * (FRAME_D / 2 - PANEL_THICK / 2)
+    cy_hinge = rack_face_y + sign * (FRAME_D / 2)
+    cy_latch = rack_face_y + sign * (FRAME_D * 0.55)
+
+    # ── Outer frame: four perimeter strips ───────────────────────────────
+    # Left post
+    parts.append(_create_box_object(
+        f"{panel_name}_fr_L",
+        cx=rx + (-(w / 2) + FRAME_W / 2), cy=ry + cy_frame, cz=rz + bh + rh / 2,
+        w=FRAME_W, d=FRAME_D, h=rh,
         collection=col,
-    )
+    ))
+    # Right post
+    parts.append(_create_box_object(
+        f"{panel_name}_fr_R",
+        cx=rx + (w / 2) - FRAME_W / 2, cy=ry + cy_frame, cz=rz + bh + rh / 2,
+        w=FRAME_W, d=FRAME_D, h=rh,
+        collection=col,
+    ))
+    # Top rail
+    parts.append(_create_box_object(
+        f"{panel_name}_fr_top",
+        cx=rx + 0.0, cy=ry + cy_frame, cz=rz + bh + rh + FRAME_W / 2,
+        w=w, d=FRAME_D, h=FRAME_W,
+        collection=col,
+    ))
+    # Bottom rail
+    parts.append(_create_box_object(
+        f"{panel_name}_fr_bot",
+        cx=rx + 0.0, cy=ry + cy_frame, cz=rz + bh - FRAME_W / 2,
+        w=w, d=FRAME_D, h=FRAME_W,
+        collection=col,
+    ))
 
-    # ── Hinge attachment empties (left side, 3 positions) ─────────────────
+    # ── Recessed inner panel ──────────────────────────────────────────────
+    # Sits at half the frame depth — creates the ~10 mm handle clearance pocket.
+    inner_w = w - 2 * FRAME_W - 0.004
+    inner_h = rh - 0.004
+    parts.append(_create_box_object(
+        f"{panel_name}_panel",
+        cx=rx + 0.0, cy=ry + cy_panel, cz=rz + bh + rh / 2,
+        w=inner_w, d=PANEL_THICK, h=inner_h,
+        collection=col,
+    ))
+
+    # ── Hinge knuckle blocks (3, left exterior) ───────────────────────────
+    # Each hinge = outer knuckle body + smaller pin-detail nub
+    cx_hinge = -(w / 2) + HINGE_W_EXT / 2
+    for i, rel_pos in enumerate(HINGE_POSITIONS):
+        hz = bh + rh * rel_pos
+        parts.append(_create_box_object(
+            f"{panel_name}_hng_{i}_body",
+            cx=rx + cx_hinge, cy=ry + cy_hinge, cz=rz + hz,
+            w=HINGE_W_EXT, d=HINGE_D, h=HINGE_H,
+            collection=col,
+        ))
+        parts.append(_create_box_object(
+            f"{panel_name}_hng_{i}_pin",
+            cx=rx + cx_hinge, cy=ry + cy_hinge + sign * (HINGE_D * 0.25),
+            cz=rz + hz,
+            w=HINGE_W_EXT * 0.45, d=HINGE_D * 0.55, h=HINGE_H * 0.22,
+            collection=col,
+        ))
+
+    # ── Latch guard plate + handle bar (right exterior) ───────────────────
+    cx_latch = (w / 2) - LATCH_W_EXT / 2
+    parts.append(_create_box_object(
+        f"{panel_name}_latch_guard",
+        cx=rx + cx_latch, cy=ry + cy_latch, cz=rz + bh + rh * 0.50,
+        w=LATCH_W_EXT, d=FRAME_D * 0.40, h=LATCH_H,
+        collection=col,
+    ))
+    parts.append(_create_box_object(
+        f"{panel_name}_latch_bar",
+        cx=rx + cx_latch,
+        cy=ry + rack_face_y + sign * (FRAME_D + LATCH_BAR_D / 2),
+        cz=rz + bh + rh * 0.50,
+        w=LATCH_W_EXT * 0.55, d=LATCH_BAR_D, h=LATCH_H * 0.44,
+        collection=col,
+    ))
+
+    # ── Join all parts into single door mesh ──────────────────────────────
+    # Use rack_tools' bmesh-based join (avoids bpy.ops.object.join context req)
+    joined = _bmesh_join(panel_name, parts, col)
+
+    # ── UE5 animation empties ─────────────────────────────────────────────
+    hinge_y       = rack_face_y + sign * (FRAME_D / 2)
     hinge_empties = []
     for i, rel_pos in enumerate(HINGE_POSITIONS):
         hz = bh + rh * rel_pos
         e  = bpy.data.objects.new(f"{panel_name}_hinge_attach_{i}", None)
         e.empty_display_type = 'ARROWS'
         e.empty_display_size = 0.02
-        e.location = (-(w / 2) + ANCHOR_INSET_M, cy, hz)
+        e.location = (rx + (-(w / 2) + ANCHOR_INSET_M), ry + hinge_y, rz + hz)
         col.objects.link(e)
-        e.parent = panel
-        e.matrix_parent_inverse = panel.matrix_world.inverted()
+        e.parent = joined
+        e.matrix_parent_inverse = joined.matrix_world.inverted()
         hinge_empties.append(e.name)
 
-    # ── Latch socket empty (right side, centre height) ────────────────────
     latch_e = bpy.data.objects.new(f"{panel_name}_latch_socket", None)
     latch_e.empty_display_type = 'ARROWS'
     latch_e.empty_display_size = 0.02
-    latch_e.location = ((w / 2) - ANCHOR_INSET_M, cy, bh + rh * 0.50)
+    latch_e.location = (rx + (w / 2) - ANCHOR_INSET_M, ry + hinge_y, rz + bh + rh * 0.50)
     col.objects.link(latch_e)
-    latch_e.parent = panel
-    latch_e.matrix_parent_inverse = panel.matrix_world.inverted()
+    latch_e.parent = joined
+    latch_e.matrix_parent_inverse = joined.matrix_world.inverted()
 
-    # Set origin at bottom hinge pin for correct UE5 door pivot
+    # ── Origin at bottom hinge pin (UE5 door-open pivot) ──────────────────
     hz_bottom = bh + rh * HINGE_POSITIONS[0]
-    _set_origin_to(panel, (-(w / 2) + ANCHOR_INSET_M, cy, hz_bottom))
+    _set_origin_to(joined, (rx + (-(w / 2) + ANCHOR_INSET_M), ry + hinge_y, rz + hz_bottom))
+
+    # ── Door material — solid metallic steel, EEVEE-Next compatible ───────
+    mat = bpy.data.materials.get("M_Door_Steel")
+    if mat is None:
+        mat = bpy.data.materials.new("M_Door_Steel")
+        mat.use_nodes = True
+        bsdf = mat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            bsdf.inputs["Base Color"].default_value = (0.35, 0.35, 0.38, 1.0)
+            bsdf.inputs["Metallic"].default_value = 0.9
+            bsdf.inputs["Roughness"].default_value = 0.35
+            bsdf.inputs["Alpha"].default_value = 1.0
+    # BLENDED renders as solid opaque metal in EEVEE-Next; DITHERED renders
+    # as near-invisible hash noise even at alpha=1.0.
+    mat.surface_render_method = 'BLENDED'
+    if joined.data.materials:
+        joined.data.materials[0] = mat
+    else:
+        joined.data.materials.append(mat)
 
     if vented:
-        panel["door_vented"] = True
+        joined["door_vented"] = True
 
     return {
         "object":         panel_name,
@@ -1847,7 +2010,8 @@ def create_rack_door(
         "side":           side,
         "width_mm":       round(w * 1000, 1),
         "height_mm":      round(rh * 1000, 1),
-        "thickness_mm":   round(st * 1000, 1),
+        "depth_mm":       round(FRAME_D * 1000, 1),
+        "pocket_mm":      round(FRAME_D * 500, 1),
         "hinge_empties":  hinge_empties,
         "latch_empty":    latch_e.name,
         "origin":         "bottom hinge pin",
