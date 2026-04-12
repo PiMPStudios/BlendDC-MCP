@@ -27,6 +27,7 @@ from core import mcp, thread_safe, _log
 from constants import (
     RACK_U_M, RACK_U_MM,
     EIA_RAIL_SPAN_M, EIA_RAIL_SPAN_MM,
+    EIA_EQUIPMENT_BODY_M,
     RACK_SHEET_THICK_M,
     RACK_BASE_HEIGHT_M,
     RACK_INTERIOR_HEIGHT_M,
@@ -169,7 +170,7 @@ def create_server_chassis(
     random_variation: slightly randomize bay/LED positions and counts
     """
     h  = u_size * RACK_U_M
-    w  = EIA_RAIL_SPAN_M
+    w  = EIA_EQUIPMENT_BODY_M   # 446 mm — equipment body slides inside rack posts
     d  = depth_mm / 1000.0
     st = RACK_SHEET_THICK_M
 
@@ -270,7 +271,10 @@ def create_server_chassis(
     parts.append(cable_lip)
 
     # ── Mounting ears (EIA brackets at left and right of front face) ───────
-    ear_w = 0.014   # 14 mm flange width
+    # Total panel = 482.6 mm; body = 446 mm; each ear = (482.6 - 446) / 2 = 18.3 mm
+    # Ear sits ENTIRELY in front of Y=0 (origin = chassis front = rail contact plane).
+    # Ear back face is at Y=0 → placed at setback_f, ear back touches flange front face.
+    ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2   # 18.3 mm
     ear_d = 0.007   # 7 mm deep
     ear_h = h * 0.68
 
@@ -280,16 +284,16 @@ def create_server_chassis(
 
         ear_plate = _create_box_object(
             f"{name}_ear_{side_label}",
-            cx=ear_cx, cy=-0.001 + ear_d / 2, cz=h / 2,
+            cx=ear_cx, cy=-ear_d / 2, cz=h / 2,
             w=ear_w, d=ear_d, h=ear_h,
             collection=col,
         )
         parts.append(ear_plate)
 
-        # Screw slot — raised indicator, slightly proud
+        # Screw slot — raised indicator on ear face
         ear_slot = _create_box_object(
             f"{name}_ear_slot_{side_label}",
-            cx=ear_cx, cy=-0.0015, cz=h * 0.50,
+            cx=ear_cx, cy=-ear_d + 0.001, cz=h * 0.50,
             w=ear_w * 0.30, d=0.001, h=h * 0.22,
             collection=col,
         )
@@ -450,7 +454,7 @@ def create_network_switch(
     random_variation: randomize LED/port positions and per-unit material
     """
     h  = u_size * RACK_U_M
-    w  = EIA_RAIL_SPAN_M
+    w  = EIA_EQUIPMENT_BODY_M   # 446 mm body
     d  = 0.300
     st = RACK_SHEET_THICK_M
 
@@ -582,7 +586,7 @@ def create_network_switch(
     parts.append(pwr_led)
 
     # ── Mounting ears L+R ─────────────────────────────────────────────────
-    ear_w = 0.014
+    ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2   # 18.3 mm
     ear_d = 0.007
     ear_h = h * 0.68
     for side_sign in (-1, 1):
@@ -590,14 +594,14 @@ def create_network_switch(
         ear_cx = side_sign * (w / 2 + ear_w / 2)
         ear_plate = _create_box_object(
             f"{name}_ear_{side_label}",
-            cx=ear_cx, cy=-0.001 + ear_d / 2, cz=h / 2,
+            cx=ear_cx, cy=-ear_d / 2, cz=h / 2,
             w=ear_w, d=ear_d, h=ear_h,
             collection=col,
         )
         parts.append(ear_plate)
         ear_slot = _create_box_object(
             f"{name}_ear_slot_{side_label}",
-            cx=ear_cx, cy=-0.0015, cz=h * 0.50,
+            cx=ear_cx, cy=-ear_d + 0.001, cz=h * 0.50,
             w=ear_w * 0.30, d=0.001, h=h * 0.22,
             collection=col,
         )
@@ -727,7 +731,7 @@ def create_patch_panel(
     random_variation: randomize port positions and per-unit material
     """
     h  = u_size * RACK_U_M
-    w  = EIA_RAIL_SPAN_M
+    w  = EIA_EQUIPMENT_BODY_M   # 446 mm body
     d  = 0.040
     st = RACK_SHEET_THICK_M
 
@@ -830,7 +834,7 @@ def create_patch_panel(
         parts.append(ring)
 
     # ── Mounting ears L+R ─────────────────────────────────────────────────
-    ear_w = 0.014
+    ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2   # 18.3 mm
     ear_d = 0.007
     ear_h = h * 0.70
     for side_sign in (-1, 1):
@@ -838,14 +842,14 @@ def create_patch_panel(
         ear_cx = side_sign * (w / 2 + ear_w / 2)
         ear_plate = _create_box_object(
             f"{name}_ear_{side_label}",
-            cx=ear_cx, cy=-0.001 + ear_d / 2, cz=h / 2,
+            cx=ear_cx, cy=-ear_d / 2, cz=h / 2,
             w=ear_w, d=ear_d, h=ear_h,
             collection=col,
         )
         parts.append(ear_plate)
         ear_slot = _create_box_object(
             f"{name}_ear_slot_{side_label}",
-            cx=ear_cx, cy=-0.0015, cz=h * 0.50,
+            cx=ear_cx, cy=-ear_d + 0.001, cz=h * 0.50,
             w=ear_w * 0.30, d=0.001, h=h * 0.25,
             collection=col,
         )
@@ -981,7 +985,7 @@ def create_pdu(
 
     else:  # 1U horizontal
         h_pdu = u_size * RACK_U_M
-        w_pdu = EIA_RAIL_SPAN_M
+        w_pdu = EIA_EQUIPMENT_BODY_M   # 446 mm body
         d_pdu = 0.200
 
         body = _create_box_object(

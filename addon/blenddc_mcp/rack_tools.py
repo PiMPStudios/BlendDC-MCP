@@ -34,7 +34,9 @@ from constants import (
     RACK_POST_SIZE_M, RACK_POST_SIZE_MM,
     RACK_SHEET_THICK_M, RACK_SHEET_THICK_MM,
     RACK_RAIL_THICK_M, RACK_RAIL_THICK_MM,
-    RACK_RAIL_FLANGE_M, RACK_RAIL_FLANGE_MM,
+    RACK_RAIL_FLANGE_W_M, RACK_RAIL_FLANGE_W_MM,
+    RACK_INNER_CLEAR_M,
+    EIA_HOLE_INSET_M,
     RACK_SETBACK_FRONT_M, RACK_SETBACK_REAR_M,
     HINGE_PIN_DIAM_M, HINGE_PIN_HEIGHT_M, HINGE_COUNT_PER_DOOR,
     LATCH_WIDTH_M, LATCH_HEIGHT_M, LATCH_DEPTH_M,
@@ -158,84 +160,85 @@ def _bmesh_join(
 def _create_l_rail(
     name: str,
     sign_x: int,
-    cy: float,
-    flange_cy: float,
+    half_inner: float,
+    rfw: float,
+    rt: float,
+    setback: float,
     cz: float,
     height: float,
-    rt: float,
-    rf: float,
-    ps: float,
-    hs: float,
+    frame_height: float,
+    web_depth: float,
+    web_cy: float,
     collection: bpy.types.Collection,
     eia_holes: bool = True,
     u_height: int = 42,
 ) -> Dict[str, Any]:
     """
-    Create a continuous L-bracket mounting rail: solid web + flange with EIA holes.
+    Create one vertical L-channel post: structural web + EIA mounting face.
 
-    Cross-section viewed from above (left front rail, sign_x = -1):
+    Cross-section viewed from above (left rail, sign_x = -1):
 
-        Y=0 (front face)
-        ↓
-        [flange rf×rf]|web rt×ps| post ...
-        ←rf→          ↑
-                inner face at −hs (EIA-310 = −241.3 mm)
+        X = -(half_inner + rfw + rt)   -(half_inner + rfw)   -half_inner
+                        |<-- web rt wide -->|<----- rfw ------>|
+                        [    web plate      ][  mounting face   ]  (open interior →)
+                                            ↑
+                               inner edge at ±half_inner (225 mm from centre)
 
-    The web spans the full post depth (ps) in Y.
-    The flange is rf wide inward (X) and rf deep front-to-back (Y), positioned
-    flush with the post face: flange_cy = rf/2 for front rails (Y=0 → Y=rf),
-    flange_cy = depth−rf/2 for rear rails (Y=depth−rf → Y=depth).
+    Web:    thin sheet (rt × full_depth × frame_height) at the outermost X position.
+            Spans the full cabinet depth and full structural height.
+    Flange: thin mounting face (rfw × rt × height) at Y = setback, inner edge at
+            ±half_inner.  EIA holes punched through via bmesh extrusion.
 
-    When eia_holes=True, the flange is built as a proper manifold mesh using
-    bmesh face-region extrusion:
+    EIA hole centres: sign_x × (EIA_RAIL_SPAN_M/2 − EIA_HOLE_INSET_M) = ±233.4 mm.
+    Inner clear opening between flange inner faces: 2 × half_inner = 450 mm.
+    Equipment body (446 mm) slides through with ~4 mm clearance each side.
 
-      1. Build the front face (XZ plane at Y=flange_front) using a consistent
-         3-column topology (left-margin | center | right-margin) for EVERY
-         segment along Z.  For bar segments all 3 quads are present; for hole
-         segments only the two margin quads exist (center is open = the hole).
-      2. remove_doubles merges shared vertices at every segment boundary,
-         giving a fully-connected 2D face mesh.
-      3. extrude_face_region extrudes all faces in +Y by rf.  Boundary edges
-         at the hole openings (inner walls at x_hl / x_hr, and top/bottom caps
-         where bars adjoin holes) automatically become closed rectangular
-         tunnels — no Boolean operations required.
-
-    This produces smooth, continuous L-brackets with clean square EIA-310
-    through-holes visible from the rack interior.  No "teeth" or serrated edges.
-
-    sign_x:    -1 = left rail, +1 = right rail
-    cy:        Y-centre of the web
-    flange_cy: Y-centre of the flange (rf/2 for front, rack_depth−rf/2 for rear)
-    cz:        Z-centre of the rail (= base_h + rail_h / 2)
-    height:    full interior rail height (u_height × RACK_U_M)
-    rt:        web thickness  (RACK_RAIL_THICK_M  = 3 mm)
-    rf:        flange inward projection AND front-to-back depth (20 mm)
-    ps:        post size (RACK_POST_SIZE_M = 60 mm)
-    hs:        half EIA rail span (EIA_RAIL_SPAN_M / 2 = 241.3 mm)
-    eia_holes: True = build holed flange via bmesh; False = solid box flange
-    u_height:  rack unit count (used only when eia_holes=True)
-
-    Returns {"web": web_obj, "flange_parts": [flange_obj]}.
+    sign_x:      -1 = left rail, +1 = right rail
+    half_inner:  half the inner clear opening (RACK_INNER_CLEAR_M / 2 = 225 mm)
+    rfw:         flange width in X (RACK_RAIL_FLANGE_W_M = 57.15 mm)
+    rt:          sheet metal thickness (RACK_RAIL_THICK_M = 2 mm)
+    setback:     Y of the mounting face front surface (RACK_SETBACK_FRONT_M = 75 mm)
+    cz:          Z-centre of the rail zone (base_h + rail_h / 2)
+    height:      EIA rail zone height (u_height × RACK_U_M)
+    frame_height: full cabinet structural height (web spans this)
+    web_depth:   Y depth of the post column (post size, e.g. RACK_POST_SIZE_M = 60 mm)
+    web_cy:      Y centre of the post column (ps/2 for front, d−ps/2 for rear)
+    eia_holes:   True = punch EIA holes via bmesh; False = solid box flange
+    u_height:    rack unit count (used when eia_holes=True)
     """
-    # ── Web: solid vertical plate, full height ─────────────────────────────
+    # ── Web: L-channel post column — narrow vertical member at each corner ──
+    # Depth = post cross-section only (not full rack depth) so the open frame
+    # does not look like it has solid side panels.  Side crossbars provide the
+    # front-to-rear structural connection.
+    half_outer = half_inner + rfw
     web = _create_box_object(
         f"{name}_web",
-        cx=sign_x * (hs + rt / 2),
-        cy=cy,
-        cz=cz,
-        w=rt, d=ps, h=height,
+        cx=sign_x * (half_outer + rt / 2),
+        cy=web_cy,
+        cz=frame_height / 2,
+        w=rt, d=web_depth, h=frame_height,
         collection=collection,
     )
 
-    flange_cx = sign_x * (hs - rf / 2)
+    # X extents of the mounting face (inner face at ±half_inner, outer at ±half_outer)
+    x_inner = sign_x * half_inner
+    x_outer = sign_x * half_outer
+    x_l = min(x_inner, x_outer)   # smaller X value
+    x_r = max(x_inner, x_outer)   # larger  X value
+
+    # EIA hole centre X: 7.938 mm inset from equipment panel edge (482.6 mm / 2 = 241.3 mm)
+    hole_cx = sign_x * (EIA_RAIL_SPAN_M / 2 - EIA_HOLE_INSET_M)  # ±233.362 mm
+    hole_sz = RACK_HOLE_SIZE_M                                     # 9.525 mm
+    x_hl = hole_cx - hole_sz / 2   # left edge of hole slot
+    x_hr = hole_cx + hole_sz / 2   # right edge of hole slot
 
     if not eia_holes:
         flange = _create_box_object(
             f"{name}_flange",
-            cx=flange_cx,
-            cy=flange_cy,
+            cx=(x_l + x_r) / 2,
+            cy=setback + rt / 2,
             cz=cz,
-            w=rf, d=rf, h=height,
+            w=x_r - x_l, d=rt, h=height,
             collection=collection,
         )
         return {"web": web, "flange_parts": [flange]}
@@ -254,22 +257,14 @@ def _create_l_rail(
     #   Bar segment  → 3 faces: [x_l,x_hl], [x_hl,x_hr], [x_hr,x_r]  (all solid)
     #   Hole segment → 2 faces: [x_l,x_hl],              [x_hr,x_r]  (center open)
     # After remove_doubles all shared boundary vertices merge cleanly.
-    # extrude_face_region then creates closed hole tunnels automatically:
-    #   inner walls at x_hl / x_hr from boundary vertical edges,
-    #   top/bottom hole caps from boundary horizontal edges.
+    # extrude_face_region then creates closed hole tunnels automatically.
 
-    hole_sz = RACK_HOLE_SIZE_M                      # 0.009525 m
-    off1    = RACK_HOLE_OFFSETS_MM[1] / 1000.0      # 0.01588 m
-    off2    = RACK_HOLE_OFFSETS_MM[2] / 1000.0      # 0.02857 m
-    u_m     = RACK_U_M                              # 0.04445 m
+    off1 = RACK_HOLE_OFFSETS_MM[1] / 1000.0   # 0.01588 m
+    off2 = RACK_HOLE_OFFSETS_MM[2] / 1000.0   # 0.02857 m
+    u_m  = RACK_U_M                            # 0.04445 m
 
-    rail_base_z = cz - height / 2.0                 # Z of rail bottom
-
-    x_l  = flange_cx - rf / 2                       # outer X edge of flange
-    x_r  = flange_cx + rf / 2                       # inner X edge
-    x_hl = flange_cx - hole_sz / 2                  # left edge of hole
-    x_hr = flange_cx + hole_sz / 2                  # right edge of hole
-    y_f  = flange_cy - rf / 2                       # front face of flange (low Y)
+    rail_base_z = cz - height / 2.0            # Z of rail zone bottom
+    y_f = setback                              # front face of mounting flange
 
     bm = bmesh.new()
 
@@ -286,24 +281,23 @@ def _create_l_rail(
 
         # Six segments per U: (z_start, z_end, is_hole)
         segs = [
-            (uz,               uz + hole_sz,     True),
-            (uz + hole_sz,     uz + off1,         False),
-            (uz + off1,        uz + off1 + hole_sz, True),
-            (uz + off1 + hole_sz, uz + off2,      False),
-            (uz + off2,        uz + off2 + hole_sz, True),
-            (uz + off2 + hole_sz, uz + u_m,       False),
+            (uz,                    uz + hole_sz,          True),
+            (uz + hole_sz,          uz + off1,             False),
+            (uz + off1,             uz + off1 + hole_sz,   True),
+            (uz + off1 + hole_sz,   uz + off2,             False),
+            (uz + off2,             uz + off2 + hole_sz,   True),
+            (uz + off2 + hole_sz,   uz + u_m,              False),
         ]
 
         for z0, z1, is_hole in segs:
             if z1 - z0 < 1e-9:
                 continue
             if is_hole:
-                # Two margin quads; center is left open (the hole opening)
+                # Two margin quads; center is left open (the hole)
                 _quad(x_l, x_hl, z0, z1)
                 _quad(x_hr, x_r, z0, z1)
             else:
-                # Three sub-quads — consistent 3-column topology at all Z levels
-                # so vertices at hole/bar boundaries merge cleanly after remove_doubles
+                # Three sub-quads — consistent topology so vertices merge cleanly
                 _quad(x_l,  x_hl, z0, z1)
                 _quad(x_hl, x_hr, z0, z1)
                 _quad(x_hr, x_r,  z0, z1)
@@ -311,15 +305,11 @@ def _create_l_rail(
     # Merge coincident vertices at segment boundaries
     bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=1e-6)
 
-    # Extrude the entire front-face region in +Y by rf.
-    # Boundary edges automatically become:
-    #   • inner hole walls  (vertical edges at x_hl / x_hr inside hole segments)
-    #   • top / bottom hole caps (horizontal edges at bar/hole Z boundaries)
-    #   • outer perimeter walls (all four outer edges of the flange)
+    # Extrude in +Y by rt (2 mm) to give the mounting face its thickness.
     original_faces = list(bm.faces)
     ret = bmesh.ops.extrude_face_region(bm, geom=original_faces)
     new_verts = [v for v in ret["geom"] if isinstance(v, bmesh.types.BMVert)]
-    bmesh.ops.translate(bm, vec=(0.0, rf, 0.0), verts=new_verts)
+    bmesh.ops.translate(bm, vec=(0.0, rt, 0.0), verts=new_verts)
 
     bm.normal_update()
 
@@ -584,7 +574,7 @@ def create_rack_cabinet(
     include_base:        Add floor-mounting L-brackets at each corner post
     include_door_mounts: Add hinge pin stubs and latch receivers on front and rear faces
     include_fan_tray:    Add 1U exhaust fan tray (2×2 fans) at top of rail zone
-    include_crossbars:   Add structural horizontal crossbars at rear posts
+    include_crossbars:   Add structural side crossbars (front-to-back on each side, at 1/3 and 2/3 height)
     include_rear_panel:  Add solid rear panel (default False — rear is open)
     join_mesh:           Join all parts into a single mesh object (default True)
     eia_holes:           Punch EIA-310 square mounting holes into rail flanges
@@ -596,30 +586,31 @@ def create_rack_cabinet(
     Returns collection name, object list, key sockets, rack dimensions, and origin.
     """
     # ── Derive dimensions ──────────────────────────────────────────────────
-    w    = width_mm / 1000.0
-    d    = depth_mm / 1000.0
-    ps   = post_size_mm / 1000.0
-    st   = sheet_thickness_mm / 1000.0
-    rt   = RACK_RAIL_THICK_M
-    rf   = RACK_RAIL_FLANGE_M
-    bh   = RACK_BASE_HEIGHT_M
-    th   = RACK_TOP_HEIGHT_M
-    rh   = u_height * RACK_U_M          # usable rail height
-    tot  = bh + rh + th                 # total cabinet height
+    w          = width_mm / 1000.0
+    d          = depth_mm / 1000.0
+    ps         = post_size_mm / 1000.0
+    st         = sheet_thickness_mm / 1000.0
+    rt         = RACK_RAIL_THICK_M
+    rfw        = RACK_RAIL_FLANGE_W_M
+    half_inner = RACK_INNER_CLEAR_M / 2    # 225 mm — inner clear half-width
+    bh         = RACK_BASE_HEIGHT_M
+    th         = RACK_TOP_HEIGHT_M
+    rh         = u_height * RACK_U_M       # usable rail height
+    tot        = bh + rh + th              # total cabinet height
 
-    # EIA rail positions (inner faces of mounting rails, ±241.3 mm)
-    half_span = EIA_RAIL_SPAN_M / 2     # 0.2413 m
+    # Outer X extent of each rail assembly (web outer face centre)
+    half_outer = half_inner + rfw          # 282.15 mm from centre
 
-    # Post centres
-    post_cx   = w / 2 - ps / 2          # 0.270 m for default 600 mm rack
-    post_cy_f = ps / 2                  # front post Y centre
-    post_cy_r = d - ps / 2             # rear post Y centre
+    # Floor bracket and crossbar reference positions
+    post_cx   = half_outer + rt / 2        # outermost X of web centre
+    post_cy_f = ps / 2                     # front bracket Y centre
+    post_cy_r = d - ps / 2                 # rear bracket / crossbar Y centre
 
     warnings: List[str] = []
-    if half_span + rt > post_cx:
+    if half_outer + rt > w / 2:
         warnings.append(
-            f"EIA rail span ({EIA_RAIL_SPAN_MM} mm) plus rail thickness exceeds "
-            f"available post inner clearance — increase width_mm or reduce post_size_mm"
+            f"Rail outer edge ({round((half_outer + rt) * 1000, 1)} mm) exceeds "
+            f"cabinet half-width ({round(w / 2 * 1000, 1)} mm) — increase width_mm"
         )
 
     # ── Create collection ──────────────────────────────────────────────────
@@ -634,27 +625,29 @@ def create_rack_cabinet(
     bpy.context.scene.collection.children.link(col)
 
     # Store rack metadata as custom properties for downstream tools
-    col["rack_u_height"]       = u_height
-    col["rack_width_mm"]       = width_mm
-    col["rack_depth_mm"]       = depth_mm
-    col["rack_post_size_mm"]   = post_size_mm
-    col["rack_sheet_thick_mm"] = sheet_thickness_mm
-    col["rack_base_height_m"]  = bh
-    col["rack_rail_height_m"]  = rh
-    col["rack_top_height_m"]   = th
-    col["rack_total_height_m"] = tot
-    col["rack_half_span_m"]    = half_span
-    col["rack_has_fan_tray"]   = include_fan_tray
-    col["rack_has_crossbars"]  = include_crossbars
-    col["is_rack_cabinet"]     = True
+    col["rack_u_height"]         = u_height
+    col["rack_width_mm"]         = width_mm
+    col["rack_depth_mm"]         = depth_mm
+    col["rack_post_size_mm"]     = post_size_mm
+    col["rack_sheet_thick_mm"]   = sheet_thickness_mm
+    col["rack_base_height_m"]    = bh
+    col["rack_rail_height_m"]    = rh
+    col["rack_top_height_m"]     = th
+    col["rack_total_height_m"]   = tot
+    col["rack_half_span_m"]      = EIA_RAIL_SPAN_M / 2   # kept for back-compat
+    col["rack_inner_clear_m"]    = RACK_INNER_CLEAR_M
+    col["rack_setback_front_m"]  = RACK_SETBACK_FRONT_M
+    col["rack_setback_rear_m"]   = RACK_SETBACK_REAR_M
+    col["rack_has_fan_tray"]     = include_fan_tray
+    col["rack_has_crossbars"]    = include_crossbars
+    col["is_rack_cabinet"]       = True
 
-    body_objs: List[bpy.types.Object] = []
-    rail_objs: List[bpy.types.Object] = []
+    frame_objs: List[bpy.types.Object] = []   # open-frame skeleton → _Body
+    shell_objs: List[bpy.types.Object] = []   # enclosure skin      → _Shell
+    rail_objs:  List[bpy.types.Object] = []   # EIA mounting faces  → _Rails
 
-    # ── Floor-mounting L-brackets (replaces simple base box) ──────────────
-    # Four seismic anchor brackets — one at each corner post.
-    # Vertical plate bolted to post outer face; horizontal flange on floor.
-    # No casters or levelling feet — rack is bolted directly to raised floor.
+    # ── Floor-mounting L-brackets ──────────────────────────────────────────
+    # Part of the enclosure shell (not the open-frame skeleton).
     if include_base:
         bracket_configs = [
             ("FL", -post_cx, post_cy_f),
@@ -670,90 +663,72 @@ def create_rack_cabinet(
                 corner_tag=tag,
                 collection=col,
             )
-            body_objs.extend(bracket_parts)
+            shell_objs.extend(bracket_parts)
 
-    # ── 4 corner posts ─────────────────────────────────────────────────────
-    post_configs = [
-        ("FL", -post_cx, post_cy_f),
-        ("FR",  post_cx, post_cy_f),
-        ("RL", -post_cx, post_cy_r),
-        ("RR",  post_cx, post_cy_r),
-    ]
-    for tag, pcx, pcy in post_configs:
-        post = _create_box_object(
-            f"{col_name}_post_{tag}",
-            cx=pcx, cy=pcy, cz=tot / 2,
-            w=ps, d=ps, h=tot,
-            collection=col,
-        )
-        body_objs.append(post)
-
-    # ── Mounting rails — continuous L-brackets, full interior height ──────
+    # ── Mounting rails — L-channel posts with integrated EIA mounting faces ─
     # Four rails: front-left, front-right, rear-left, rear-right.
+    # Each rail IS the structural post: web at outer X spans full depth/height;
+    # mounting flange at inner edge (±225 mm) with EIA-310 holes.
     #
-    # Rail setback (from door plane to flange mounting face):
-    #   Front: RACK_SETBACK_FRONT_M = 75 mm — clearance for front door + cable dressing
-    #   Rear:  RACK_SETBACK_REAR_M  = 125 mm — clearance for rear door + cable management
-    #   → usable mounting depth (1000 mm rack) = 1000 − 75 − 125 = 800 mm
-    #
-    # Web geometry: each web bridges from the post face to just behind the flange.
-    #   Front web depth = setback_f + rf  (post front face → flange back face)
-    #   Rear  web depth = setback_r + rf  (flange back face → post rear face)
-    setback_f = RACK_SETBACK_FRONT_M    # 0.075 m
-    setback_r = RACK_SETBACK_REAR_M     # 0.125 m
+    # Rail setback (Y of mounting face front surface):
+    #   Front: RACK_SETBACK_FRONT_M = 75 mm
+    #   Rear:  mounting face front at d − setback_r − rt
+    setback_f   = RACK_SETBACK_FRONT_M                # 0.075 m
+    setback_r   = RACK_SETBACK_REAR_M                 # 0.125 m
+    setback_r_y = d - setback_r - rt                  # Y of rear flange front face
 
-    # Flange centres (Y position where equipment mounting face sits)
-    flange_cy_f = setback_f + rf / 2               # 0.085 m from front
-    flange_cy_r = d - setback_r - rf / 2           # 0.865 m from front
-
-    # Web centres and depths (web bridges post face → flange back face)
-    web_depth_f = setback_f + rf                    # 0.095 m
-    web_cy_f    = web_depth_f / 2                   # 0.0475 m
-    web_depth_r = setback_r + rf                    # 0.145 m
-    web_cy_r    = d - web_depth_r / 2              # 0.9275 m
+    # Post column Y centres and depths (front/rear posts, not spanning full depth)
+    web_cy_f = ps / 2          # front post column Y centre
+    web_cy_r = d - ps / 2      # rear post column Y centre
 
     rail_configs = [
-        # (tag,  sign_x, web_cy,    flange_cy,    web_depth)
-        ("LF",   -1,     web_cy_f,  flange_cy_f,  web_depth_f),
-        ("RF",   +1,     web_cy_f,  flange_cy_f,  web_depth_f),
-        ("LR",   -1,     web_cy_r,  flange_cy_r,  web_depth_r),
-        ("RR",   +1,     web_cy_r,  flange_cy_r,  web_depth_r),
+        # (tag,  sign_x, setback_y,   web_cy,    web_depth)
+        ("LF",   -1,     setback_f,   web_cy_f,  ps),
+        ("RF",   +1,     setback_f,   web_cy_f,  ps),
+        ("LR",   -1,     setback_r_y, web_cy_r,  ps),
+        ("RR",   +1,     setback_r_y, web_cy_r,  ps),
     ]
-    for tag, sx, rcy, fcy, web_d in rail_configs:
+    for tag, sx, sb_y, wcy, wdepth in rail_configs:
         parts = _create_l_rail(
             name=f"{col_name}_rail_{tag}",
             sign_x=sx,
-            cy=rcy,
-            flange_cy=fcy,
+            half_inner=half_inner,
+            rfw=rfw,
+            rt=rt,
+            setback=sb_y,
             cz=bh + rh / 2,
             height=rh,
-            rt=rt, rf=rf, ps=web_d,
-            hs=half_span,
+            frame_height=tot,
+            web_depth=wdepth,
+            web_cy=wcy,
             collection=col,
             eia_holes=eia_holes,
             u_height=u_height,
         )
-        body_objs.append(parts["web"])
+        frame_objs.append(parts["web"])
         rail_objs.extend(parts["flange_parts"])
 
-    # ── Structural crossbars ───────────────────────────────────────────────
-    # Two horizontal bars connecting left/right rear posts at 1/3 and 2/3 height.
-    # Placed at rear (hidden behind rear panel) for structural rigidity.
+    # ── Structural side crossbars ──────────────────────────────────────────
+    # Four horizontal bars (two per side) running front-to-back on each side of
+    # the open frame at 1/3 and 2/3 of rail height.  Positioned at the outer face
+    # of each rail web so they're visible from the side of the open-frame rack.
+    # (Rear-spanning bars are part of the enclosure shell, not the open frame.)
     if include_crossbars:
         for frac, tag in ((1.0 / 3.0, "lower"), (2.0 / 3.0, "upper")):
-            cbar = _create_box_object(
-                f"{col_name}_crossbar_{tag}",
-                cx=0.0,
-                cy=post_cy_r,
-                cz=bh + rh * frac,
-                w=w,
-                d=RACK_CROSSBAR_T_M,
-                h=RACK_CROSSBAR_H_M,
-                collection=col,
-            )
-            body_objs.append(cbar)
+            for sx, side_tag in ((-1, "L"), (+1, "R")):
+                cbar = _create_box_object(
+                    f"{col_name}_crossbar_{tag}_{side_tag}",
+                    cx=sx * post_cx,
+                    cy=d / 2,
+                    cz=bh + rh * frac,
+                    w=RACK_CROSSBAR_T_M,
+                    d=d,
+                    h=RACK_CROSSBAR_H_M,
+                    collection=col,
+                )
+                frame_objs.append(cbar)
 
-    # ── Side panels ────────────────────────────────────────────────────────
+    # ── Side panels  ──→  SHELL ────────────────────────────────────────────
     if include_side_panels:
         for sx, tag in ((-1, "L"), (1, "R")):
             panel = _create_box_object(
@@ -764,9 +739,9 @@ def create_rack_cabinet(
                 w=st, d=d, h=tot,
                 collection=col,
             )
-            body_objs.append(panel)
+            shell_objs.append(panel)
 
-    # ── Rear panel (optional — open by default) ────────────────────────────
+    # ── Rear panel  ──→  SHELL ────────────────────────────────────────────
     if include_rear_panel:
         rear = _create_box_object(
             f"{col_name}_panel_rear",
@@ -776,27 +751,24 @@ def create_rack_cabinet(
             w=w, d=st, h=tot,
             collection=col,
         )
-        body_objs.append(rear)
+        shell_objs.append(rear)
 
-    # ── Top cap enclosure walls (front + rear of the fan/exhaust zone) ────────
-    # The top cap zone sits between the fan tray (bh+rh) and the top panel (tot).
-    # Side panels already cover the full height; front and rear need closing strips.
+    # ── Top cap enclosure walls  ──→  SHELL ───────────────────────────────
     if include_top_panel:
         cap_front = _create_box_object(
             f"{col_name}_topcap_front",
             cx=0.0, cy=st / 2, cz=bh + rh + th / 2,
             w=w, d=st, h=th, collection=col,
         )
-        body_objs.append(cap_front)
+        shell_objs.append(cap_front)
         cap_rear = _create_box_object(
             f"{col_name}_topcap_rear",
             cx=0.0, cy=d - st / 2, cz=bh + rh + th / 2,
             w=w, d=st, h=th, collection=col,
         )
-        body_objs.append(cap_rear)
+        shell_objs.append(cap_rear)
 
-    # ── Top panel — solid with exhaust slots over fan zone ─────────────────
-    # Thin sheet at the very top; slots aligned directly above the fan zone.
+    # ── Top panel  ──→  SHELL ─────────────────────────────────────────────
     if include_top_panel:
         top_parts = _create_zoned_vent_plate(
             name_prefix=f"{col_name}_panel_top",
@@ -805,24 +777,41 @@ def create_rack_cabinet(
             h=st,
             collection=col,
         )
-        body_objs.extend(top_parts)
+        shell_objs.extend(top_parts)
 
-    # ── Exhaust fan tray (1U, 2×2 fans) ───────────────────────────────────
-    # Sits at the bottom of the top cap zone (immediately above the rail zone).
-    # 4 × 120 mm fan frame plates in a 2×2 grid — visible from above and in
-    # top-down renders; also visible when the top lid is removed in UE5.
+    # ── Exhaust fan tray  ──→  FRAME ──────────────────────────────────────
+    # Functional part of the open frame (pulls heat up from equipment).
+    # Inset by sheet thickness so it sits flush inside the enclosure shell.
     if include_fan_tray:
         fan_parts = _create_fan_tray(
             name_prefix=col_name,
-            w=w,
-            d=d,
+            w=w - 2 * st,
+            d=d - 2 * st,
             z_base=bh + rh,
             collection=col,
         )
-        body_objs.extend(fan_parts)
+        frame_objs.extend(fan_parts)
 
-    # ── Door hardware (hinge pins + latch, front and rear) ─────────────────
+    # ── Door hardware  ──→  SHELL ─────────────────────────────────────────
     if include_door_mounts:
+        # Jamb strips: narrow vertical panels at the front and rear face openings,
+        # left (hinge) and right (latch) sides.  These give the hardware a surface
+        # to mount on.  Width = 2×ANCHOR_INSET so hardware cx sits at strip centre;
+        # depth = st (sheet metal); height = tot (full cabinet height).
+        jamb_w = 2.0 * ANCHOR_INSET_M
+        for face_tag, jamb_cy in (("front", -st / 2), ("rear", d + st / 2)):
+            for side_tag, jamb_cx in (("L", -(w / 2 - ANCHOR_INSET_M)),
+                                       ("R",  (w / 2 - ANCHOR_INSET_M))):
+                jamb = _create_box_object(
+                    f"{col_name}_jamb_{face_tag}_{side_tag}",
+                    cx=jamb_cx,
+                    cy=jamb_cy,
+                    cz=tot / 2,
+                    w=jamb_w, d=st, h=tot,
+                    collection=col,
+                )
+                shell_objs.append(jamb)
+
         hw_front = _add_door_hardware(
             col_name, w=w, base_h=bh, rail_h=rh, collection=col,
             face="front", depth=d,
@@ -831,8 +820,8 @@ def create_rack_cabinet(
             col_name, w=w, base_h=bh, rail_h=rh, collection=col,
             face="rear", depth=d,
         )
-        body_objs.extend(hw_front)
-        body_objs.extend(hw_rear)
+        shell_objs.extend(hw_front)
+        shell_objs.extend(hw_rear)
 
     # ── Join parts (if requested) then set origin once ────────────────────
     # Origin is always placed at base-front-centre:
@@ -850,27 +839,33 @@ def create_rack_cabinet(
     # its correct world position in the final combined mesh.  The resulting
     # joined object is placed at location (0, 0, 0) — its origin IS already the
     # base-front-centre without any cursor trick needed.
-    if join_mesh and body_objs and rail_objs:
-        # Join body parts → {col_name}_Body
-        _bmesh_join(col_name + "_Body", body_objs, col)
+    if join_mesh and frame_objs and rail_objs:
+        # Join open-frame parts → {col_name}_Body
+        _bmesh_join(col_name + "_Body", frame_objs, col)
         # Join rail parts → {col_name}_Rails  (LOD0: full EIA-310 through-holes)
         _bmesh_join(col_name + "_Rails", rail_objs, col)
+        # Join enclosure parts → {col_name}_Shell  (only if any shell parts exist)
+        if shell_objs:
+            _bmesh_join(col_name + "_Shell", shell_objs, col)
 
         # LOD1 rails: solid L-brackets, no holes — for medium-distance rendering (>5 m).
         # EIA holes (9.5 mm sq) are invisible beyond ~4–5 m; removing them drops the
         # rail mesh from several thousand faces to ~48 (4 rails × 2 box parts × 6 faces).
         if lod_rails and eia_holes:
             lod1_rail_objs: List[bpy.types.Object] = []
-            for tag, sx, rcy, fcy, web_d in rail_configs:
+            for tag, sx, sb_y, wcy, wdepth in rail_configs:
                 lod1_parts = _create_l_rail(
                     name=f"{col_name}_lod1_rail_{tag}",
                     sign_x=sx,
-                    cy=rcy,
-                    flange_cy=fcy,
+                    half_inner=half_inner,
+                    rfw=rfw,
+                    rt=rt,
+                    setback=sb_y,
                     cz=bh + rh / 2,
                     height=rh,
-                    rt=rt, rf=rf, ps=web_d,
-                    hs=half_span,
+                    frame_height=tot,
+                    web_depth=wdepth,
+                    web_cy=wcy,
                     collection=col,
                     eia_holes=False,
                     u_height=u_height,
@@ -882,7 +877,7 @@ def create_rack_cabinet(
 
     elif not join_mesh:
         # Each part gets origin at base-front-centre for consistent export
-        for obj in body_objs + rail_objs:
+        for obj in frame_objs + shell_objs + rail_objs:
             _set_origin_to(obj, (0.0, 0.0, 0.0))
 
     # ── Build return ───────────────────────────────────────────────────────
@@ -895,15 +890,17 @@ def create_rack_cabinet(
         "SOCKET_RackBase":  [0.0, d / 2, 0.0],
     }
 
+    has_shell = join_mesh and bool(shell_objs)
     return {
-        "collection":     col_name,
-        "objects":        final_objects,
-        "joined":         join_mesh,
-        "body_object":       col_name + "_Body" if join_mesh else None,
+        "collection":        col_name,
+        "objects":           final_objects,
+        "joined":            join_mesh,
+        "body_object":       col_name + "_Body"  if join_mesh else None,
+        "shell_object":      col_name + "_Shell" if has_shell  else None,
         "rails_object":      col_name + "_Rails" if join_mesh else None,
         "rails_lod1_object": col_name + "_Rails_LOD1" if (join_mesh and lod_rails and eia_holes) else None,
-        "sockets":        sockets,
-        "u_height":       u_height,
+        "sockets":           sockets,
+        "u_height":          u_height,
         "external_dimensions_mm": {
             "width":  width_mm,
             "depth":  depth_mm,
@@ -913,7 +910,7 @@ def create_rack_cabinet(
             "width":       round(EIA_RAIL_SPAN_MM, 1),
             "rail_height": round(rh * 1000, 1),
         },
-        "origin": "base-front-centre (0, 0, 0)",
+        "origin":   "base-front-centre (0, 0, 0)",
         "warnings": warnings,
     }
 
@@ -944,12 +941,14 @@ def get_rack_u_position(
         raise ValueError(f"Collection '{collection_name}' has no rack metadata — "
                          "create it with create_rack_cabinet first")
 
-    u_height = col["rack_u_height"]
-    bh       = col["rack_base_height_m"]
-    rh       = col["rack_rail_height_m"]
-    hs       = col["rack_half_span_m"]
-    depth_m  = col["rack_depth_mm"] / 1000.0
-    ps_m     = col["rack_post_size_mm"] / 1000.0
+    u_height  = col["rack_u_height"]
+    bh        = col["rack_base_height_m"]
+    rh        = col["rack_rail_height_m"]
+    hs        = col["rack_half_span_m"]
+    depth_m   = col["rack_depth_mm"] / 1000.0
+    rt        = RACK_RAIL_THICK_M
+    setback_f = col.get("rack_setback_front_m", RACK_SETBACK_FRONT_M)
+    setback_r = col.get("rack_setback_rear_m",  RACK_SETBACK_REAR_M)
 
     if u_slot < 1 or u_slot > u_height:
         raise ValueError(f"u_slot must be 1–{u_height}; got {u_slot}")
@@ -959,11 +958,13 @@ def get_rack_u_position(
     slot_z_top    = slot_z_bottom + RACK_U_M
     slot_z_centre = (slot_z_bottom + slot_z_top) / 2
 
-    # Equipment bezel sits 2 mm behind the cabinet front face (Y=0 in rack-local
-    # space). Rear equipment mounts 2 mm ahead of the rear face. These are
-    # rack-LOCAL positions — callers must apply the rack's matrix_world to
-    # convert to world space (see snap_to_rack_u).
-    y = 0.002 if side.lower() == "front" else depth_m - 0.002
+    # Equipment origin = ear-back-face = chassis front face.
+    # Front: ear back face sits against the flange FRONT face (Y = setback_f).
+    # Rear:  ear back face sits against the rear flange FRONT face.
+    if side.lower() == "front":
+        y = setback_f                     # ear back flush with front flange face
+    else:
+        y = depth_m - setback_r - rt      # ear back flush with rear flange face
 
     return {
         "collection":    collection_name,

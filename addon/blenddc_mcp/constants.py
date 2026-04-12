@@ -48,10 +48,24 @@ RACK_SHEET_THICK_MM = 1.5
 RACK_SHEET_THICK_M  = 0.0015
 
 # ── L-bracket mounting rail ────────────────────────────────────────────────
-RACK_RAIL_THICK_MM  = 3.0   # rail stock thickness
-RACK_RAIL_THICK_M   = 0.003
-RACK_RAIL_FLANGE_MM = 20.0  # depth of horizontal flange (where equipment screws attach)
-RACK_RAIL_FLANGE_M  = 0.020
+RACK_RAIL_THICK_MM    = 2.0    # rail stock thickness (14–16 gauge steel)
+RACK_RAIL_THICK_M     = 0.002
+RACK_RAIL_FLANGE_W_MM = 57.15  # mounting face width (X) — EIA 2.25" spec
+RACK_RAIL_FLANGE_W_M  = 0.05715
+
+# Inner clear opening between mounting face inner edges
+# Equipment body (446 mm) slides through with ~4 mm clearance each side
+RACK_INNER_CLEAR_MM   = 450.0
+RACK_INNER_CLEAR_M    = 0.450
+
+# EIA-310: mounting hole centres are 7.938 mm (5/16") inset from equipment panel edge
+# Equipment panel = 482.6 mm (19") → hole centres at ±(241.3 − 7.938) = ±233.4 mm
+EIA_HOLE_INSET_MM     = 7.938
+EIA_HOLE_INSET_M      = 0.007938
+
+# 19" equipment body width (panel minus ears) — server body slides inside rack
+EIA_EQUIPMENT_BODY_MM = 446.0
+EIA_EQUIPMENT_BODY_M  = 0.446
 
 # Rail setback — distance from door plane to the flange's mounting face
 # Front: 75 mm gives clearance for front door swing and cable dressing
