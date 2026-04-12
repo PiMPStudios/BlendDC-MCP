@@ -35,6 +35,7 @@ from constants import (
     RACK_SHEET_THICK_M, RACK_SHEET_THICK_MM,
     RACK_RAIL_THICK_M, RACK_RAIL_THICK_MM,
     RACK_RAIL_FLANGE_M, RACK_RAIL_FLANGE_MM,
+    RACK_SETBACK_FRONT_M, RACK_SETBACK_REAR_M,
     HINGE_PIN_DIAM_M, HINGE_PIN_HEIGHT_M, HINGE_COUNT_PER_DOOR,
     LATCH_WIDTH_M, LATCH_HEIGHT_M, LATCH_DEPTH_M,
     ANCHOR_INSET_M,
@@ -682,20 +683,36 @@ def create_rack_cabinet(
 
     # ── Mounting rails — continuous L-brackets, full interior height ──────
     # Four rails: front-left, front-right, rear-left, rear-right.
-    # Each is a clean two-piece solid (web + flange) — no Boolean cuts.
-    # EIA-310 holes are added procedurally via Geometry Nodes in Phase 3.
     #
-    # flange_cy positions the flange flush with the post face:
-    #   front rails → rf/2      (flange occupies Y = 0 … rf)
-    #   rear  rails → d − rf/2  (flange occupies Y = d−rf … d)
+    # Rail setback (from door plane to flange mounting face):
+    #   Front: RACK_SETBACK_FRONT_M = 75 mm — clearance for front door + cable dressing
+    #   Rear:  RACK_SETBACK_REAR_M  = 125 mm — clearance for rear door + cable management
+    #   → usable mounting depth (1000 mm rack) = 1000 − 75 − 125 = 800 mm
+    #
+    # Web geometry: each web bridges from the post face to just behind the flange.
+    #   Front web depth = setback_f + rf  (post front face → flange back face)
+    #   Rear  web depth = setback_r + rf  (flange back face → post rear face)
+    setback_f = RACK_SETBACK_FRONT_M    # 0.075 m
+    setback_r = RACK_SETBACK_REAR_M     # 0.125 m
+
+    # Flange centres (Y position where equipment mounting face sits)
+    flange_cy_f = setback_f + rf / 2               # 0.085 m from front
+    flange_cy_r = d - setback_r - rf / 2           # 0.865 m from front
+
+    # Web centres and depths (web bridges post face → flange back face)
+    web_depth_f = setback_f + rf                    # 0.095 m
+    web_cy_f    = web_depth_f / 2                   # 0.0475 m
+    web_depth_r = setback_r + rf                    # 0.145 m
+    web_cy_r    = d - web_depth_r / 2              # 0.9275 m
+
     rail_configs = [
-        # (tag,  sign_x, web_cy,    flange_cy)
-        ("LF",   -1,     post_cy_f, rf / 2),
-        ("RF",   +1,     post_cy_f, rf / 2),
-        ("LR",   -1,     post_cy_r, d - rf / 2),
-        ("RR",   +1,     post_cy_r, d - rf / 2),
+        # (tag,  sign_x, web_cy,    flange_cy,    web_depth)
+        ("LF",   -1,     web_cy_f,  flange_cy_f,  web_depth_f),
+        ("RF",   +1,     web_cy_f,  flange_cy_f,  web_depth_f),
+        ("LR",   -1,     web_cy_r,  flange_cy_r,  web_depth_r),
+        ("RR",   +1,     web_cy_r,  flange_cy_r,  web_depth_r),
     ]
-    for tag, sx, rcy, fcy in rail_configs:
+    for tag, sx, rcy, fcy, web_d in rail_configs:
         parts = _create_l_rail(
             name=f"{col_name}_rail_{tag}",
             sign_x=sx,
@@ -703,7 +720,7 @@ def create_rack_cabinet(
             flange_cy=fcy,
             cz=bh + rh / 2,
             height=rh,
-            rt=rt, rf=rf, ps=ps,
+            rt=rt, rf=rf, ps=web_d,
             hs=half_span,
             collection=col,
             eia_holes=eia_holes,

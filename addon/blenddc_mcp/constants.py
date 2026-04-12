@@ -53,6 +53,15 @@ RACK_RAIL_THICK_M   = 0.003
 RACK_RAIL_FLANGE_MM = 20.0  # depth of horizontal flange (where equipment screws attach)
 RACK_RAIL_FLANGE_M  = 0.020
 
+# Rail setback — distance from door plane to the flange's mounting face
+# Front: 75 mm gives clearance for front door swing and cable dressing
+# Rear:  125 mm gives clearance for rear door + rear cable management
+# Combined usable mounting depth (1000 mm rack): 1000 - 75 - 125 = 800 mm
+RACK_SETBACK_FRONT_MM = 75.0
+RACK_SETBACK_FRONT_M  = 0.075
+RACK_SETBACK_REAR_MM  = 125.0
+RACK_SETBACK_REAR_M   = 0.125
+
 # ── Door hardware ──────────────────────────────────────────────────────────
 HINGE_PIN_DIAM_M   = 0.008  # 8 mm diameter hinge pin
 HINGE_PIN_HEIGHT_M = 0.020  # 20 mm tall pin stub geometry
