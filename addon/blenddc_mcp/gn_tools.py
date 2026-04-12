@@ -3,7 +3,7 @@ Geometry Nodes management tools for the Universal Blender MCP server (v2.0.0).
 
 Provides tools to add, configure, query, and apply Geometry Nodes modifiers.
 Designed for procedural rack panel generation, cable routing, and PCG workflows
-that will be implemented in Phase 3 of the UPTIME asset pipeline.
+that will be implemented as part of the BlendDC asset pipeline.
 
 All tools use @mcp.tool() + @thread_safe from core.py.
 """

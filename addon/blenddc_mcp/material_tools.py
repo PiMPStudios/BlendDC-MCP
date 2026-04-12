@@ -1,5 +1,5 @@
 """
-Material and texturing pipeline for the UPTIME datacenter simulator (v2.3.0).
+Material and texturing pipeline for the BlendDC asset pipeline.
 
 Provides PBR master material creation, Cycles baking, ORM channel packing,
 and per-instance variation tools. All materials target UE5 with Nanite +

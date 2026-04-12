@@ -1,5 +1,5 @@
 """
-Equipment kitbash and rack population tools for the UPTIME datacenter simulator.
+Equipment kitbash and rack population tools for the BlendDC asset pipeline.
 
 Provides parametric server, switch, patch panel, and PDU geometry creation,
 plus tools to populate rack collections from JSON layouts or named presets.
@@ -855,7 +855,7 @@ def populate_rack_procedural(
     Procedurally fill a rack with equipment based on a named preset.
 
     No JSON file required — equipment is created and positioned automatically.
-    Useful for rapid UPTIME level dressing and pipeline testing.
+    Useful for rapid level dressing and pipeline testing.
 
     Presets:
       'server_dense':  2U servers filling the rack, 1U blanks at boundaries

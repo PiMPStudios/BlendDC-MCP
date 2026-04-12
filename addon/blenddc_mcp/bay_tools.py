@@ -1,5 +1,5 @@
 """
-Bay and row generation tools for the UPTIME datacenter simulator.
+Bay and row generation tools for the BlendDC asset pipeline.
 
 Provides tools to build complete rack rows, hot-aisle/cold-aisle bays,
 and full bay presets ready for UE5 level dressing.

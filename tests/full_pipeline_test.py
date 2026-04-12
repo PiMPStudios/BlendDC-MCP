@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-UPTIME BlenderDC — Full Pipeline Integration Test Suite
+BlendDC — Full Pipeline Integration Test Suite
 =======================================================
 Version:  v2.7.0  (186 tools, Phases 1–8)
 Protocol: MCP Streamable HTTP  →  http://127.0.0.1:8400/mcp
@@ -12,13 +12,13 @@ HOW TO RUN
    • Wait for "MCP Server running" in the System Console
 3. From a terminal OUTSIDE Blender:
 
-       python3 tests/full_uptime_pipeline_test.py
+       python3 tests/full_pipeline_test.py
 
    Override the export directory:
-       OUTPUT_DIR=/tmp/uptime_test python3 tests/full_uptime_pipeline_test.py
+       OUTPUT_DIR=/tmp/blenddc_test python3 tests/full_pipeline_test.py
 
    Override the server URL:
-       MCP_URL=http://127.0.0.1:8400/mcp python3 tests/full_uptime_pipeline_test.py
+       MCP_URL=http://127.0.0.1:8400/mcp python3 tests/full_pipeline_test.py
 
 NOTE: requires only the Python standard library (no pip packages).
       Uses urllib.request so it runs wherever Python 3.8+ is available.
@@ -60,7 +60,7 @@ import urllib.error
 # folder to validate the files import correctly.
 OUTPUT_DIR = Path(os.environ.get(
     "OUTPUT_DIR",
-    Path.home() / "Desktop" / "uptime_test_exports",
+    Path.home() / "Desktop" / "blenddc_test_exports",
 ))
 
 # MCP server address (started via N-Panel → MCP → Start MCP Server)
@@ -72,7 +72,7 @@ TIMEOUT_S = 180
 
 # Root collection name used throughout the test.  Change only if you need
 # to run this alongside an existing scene that already uses this name.
-SECTION = "UPTIME_TEST_SECTION"
+SECTION = "DC_TEST_SECTION"
 
 # Minimum expected tool count.  Adjust upward as phases are added.
 MIN_TOOL_COUNT = 186
@@ -145,7 +145,7 @@ class Results:
 
         print()
         print(bar)
-        print(f"{_BOLD}{_CYAN}  UPTIME PIPELINE TEST SUMMARY{_RESET}   "
+        print(f"{_BOLD}{_CYAN}  BlendDC PIPELINE TEST SUMMARY{_RESET}   "
               f"{_DIM}({elapsed:.1f}s total){_RESET}")
         print(bar)
         print(f"  {_GREEN}Passed{_RESET} : {len(self.passed):>3d}")
@@ -286,7 +286,7 @@ class MCPSession:
                 "protocolVersion": self.PROTOCOL_VER,
                 "capabilities":    {"roots": {"listChanged": False}},
                 "clientInfo":      {
-                    "name":    "uptime-pipeline-test",
+                    "name":    "blenddc-pipeline-test",
                     "version": "2.7.0",
                 },
             },
@@ -479,7 +479,7 @@ def phase_facility_creation(
     """
     Creates a 2×2 bay section and a smaller preset-populated section.
 
-    Viewport: look for a new 'Facility_UPTIME_TEST_SECTION' collection in the
+    Viewport: look for a new 'Facility_DC_TEST_SECTION' collection in the
     Outliner with 4 child Bay_ collections, each containing two Row_ collections
     (hot aisle / cold aisle), perimeter wall meshes, and a raised-floor slab.
 
@@ -882,8 +882,8 @@ def phase_full_export(
 
     After this phase you should have:
       OUTPUT_DIR/
-        UPTIME_TEST_SECTION_layout.json   — UE5 facility manifest
-        UPTIME_TEST_SECTION_cables.json   — cable routing (written in Phase 4)
+        DC_TEST_SECTION_layout.json   — UE5 facility manifest
+        DC_TEST_SECTION_cables.json   — cable routing (written in Phase 4)
         racks/
           *.fbx                           — rack cabinet static mesh
           *_manifest.json                 — asset registry for the rack
@@ -1120,7 +1120,7 @@ def main() -> None:
     width = 68
     print()
     print("═" * width)
-    print(f"{_BOLD}{_CYAN}  UPTIME BlenderDC — Full Pipeline Integration Test{_RESET}")
+    print(f"{_BOLD}{_CYAN}  BlendDC — Full Pipeline Integration Test{_RESET}")
     print(f"  v2.7.0  |  {datetime.now().strftime('%Y-%m-%d  %H:%M:%S')}")
     print(f"  Server  :  {MCP_URL}")
     print(f"  Exports :  {OUTPUT_DIR}")

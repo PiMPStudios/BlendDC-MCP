@@ -1,5 +1,5 @@
 """
-Cable management geometry, routing, and export tools for the UPTIME datacenter simulator.
+Cable management geometry, routing, and export tools for the BlendDC asset pipeline.
 
 Provides parametric cable management hardware (brush strips, vertical managers,
 overhead trays, entry panels), curve-based cable routing between equipment sockets,

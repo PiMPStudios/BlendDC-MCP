@@ -1,6 +1,6 @@
 """
 Full facility layout, population, variation, export, and validation tools
-for the UPTIME datacenter simulator.
+for the BlendDC asset pipeline.
 
 Provides top-level tools that compose all lower-level modules (rack_tools,
 bay_tools, cable_tools, variation_tools) into facility-scale operations.

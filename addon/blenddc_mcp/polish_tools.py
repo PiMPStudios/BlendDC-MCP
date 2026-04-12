@@ -1,5 +1,5 @@
 """
-Polish, UX, safety, and documentation tools for the UPTIME datacenter simulator.
+Polish, UX, safety, and documentation tools for the BlendDC asset pipeline.
 
 Phase 9 (v3.0.0) — Production readiness layer built on top of the 186-tool core.
 
@@ -458,7 +458,7 @@ def _log_entry(
 def get_scene_inventory() -> Dict[str, Any]:
     """
     Walk the entire Blender scene and return a structured tally of everything
-    the UPTIME pipeline has created.
+    the BlendDC pipeline has created.
 
     Call this at the start of every session to orient yourself before issuing
     further commands.  The 'detail' list gives a per-section breakdown.
@@ -653,7 +653,7 @@ def get_session_log(
 @mcp.tool()
 @thread_safe
 def push_undo_checkpoint(
-    label: str = "UPTIME checkpoint",
+    label: str = "BlendDC checkpoint",
 ) -> Dict[str, Any]:
     """
     Push a named undo step onto Blender's undo stack.
@@ -848,7 +848,7 @@ def backup_section_metadata(
     This is NOT a geometry backup — it captures only the metadata that drives
     tool behaviour: rack U-heights, bay positions, equipment types, LED states,
     variation flags, cable routing properties, and all other custom properties
-    set by UPTIME tools.
+    set by BlendDC tools.
 
     Use restore_section_metadata to re-apply this data after a .blend reload,
     a merge conflict, or if metadata gets corrupted.
@@ -1001,7 +1001,7 @@ def quick_save_scene(
       • Subsequent Ctrl+S still saves to your original working file
 
     File naming:   {original_stem}_{YYYYMMDD_HHMMSS}[_{label}].blend
-                   e.g. uptime_dc_v2_20260411_143022_pre_variation_pass.blend
+                   e.g. blenddc_20260411_143022_pre_variation_pass.blend
 
     Save directory priority:
       1. output_dir if provided
@@ -1019,7 +1019,7 @@ def quick_save_scene(
     if bpy.data.filepath:
         stem = Path(bpy.data.filepath).stem
     else:
-        stem = "uptime_session"
+        stem = "blenddc_session"
 
     filename = f"{stem}_{ts}{suffix}.blend"
 
@@ -1074,7 +1074,7 @@ def validate_entire_scene(
     include_orphan_racks: bool = True,
 ) -> Dict[str, Any]:
     """
-    One-call health check across every UPTIME structure in the current scene.
+    One-call health check across every BlendDC structure in the current scene.
 
     Runs three validators in sequence:
       1. facility_tools.validate_facility   — per Facility_ collection
@@ -1353,7 +1353,7 @@ def suggest_next_step(
             "export_facility_layout_json",
             {
                 "section_name":       sec_name,
-                "output_path":        f"/tmp/uptime_exports/{sec_name}_layout.json",
+                "output_path":        f"/tmp/blenddc_exports/{sec_name}_layout.json",
                 "include_cables":     True,
                 "include_variation":  True,
             },

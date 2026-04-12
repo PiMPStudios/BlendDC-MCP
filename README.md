@@ -1,12 +1,10 @@
 # BlendDC-MCP
 
-### Datacenter Asset Factory for UPTIME
+### Datacenter Asset Factory
 
 **189 production-ready tools for building photorealistic datacenter environments in Blender — driven by any MCP-compatible AI frontend.**
 
 BlendDC-MCP is a Blender addon that starts a lightweight MCP server inside Blender's Python process. Connect Claude, Cursor, LM Studio, or any MCP client, then describe what you want to build — racks, bays, cables, variation, failure states, full facility sections — and get production-ready UE5 assets back.
-
-Built from the ground up for **UPTIME**, an Unreal Engine 5 datacenter operations simulator where players physically configure real-scale datacenters at runtime.
 
 ```
 AI Frontend  ──HTTP──▶  BlendDC-MCP Server (inside Blender)  ──bpy──▶  Blender Scene
@@ -73,7 +71,7 @@ The `polish_tools` module adds a professional-grade safety net for long asset-bu
 
 Then ask your AI:
 
-> *"Build me a 2×3 section of datacenter bays with hot-aisle containment, route ethernet cables between racks, apply aged_colo variation, then export to `/tmp/uptime_exports/` as a UE5 manifest."*
+> *"Build me a 2×3 section of datacenter bays with hot-aisle containment, route ethernet cables between racks, apply aged_colo variation, then export to `/tmp/blenddc_exports/` as a UE5 manifest."*
 
 The AI calls `create_facility_section` → `route_cables_between_racks` →
 `apply_facility_theme` → `export_facility_layout_json` — and reports back when done.
@@ -101,7 +99,7 @@ apply_facility_theme(
 # Export the full facility — manifest + cables + variation metadata
 export_facility_layout_json(
     section_name      = "DC_Floor_01",
-    output_path       = "/tmp/uptime/DC_Floor_01_layout.json",
+    output_path       = "/tmp/blenddc_exports/DC_Floor_01_layout.json",
     include_cables    = True,
     include_variation = True,
 )
@@ -115,7 +113,7 @@ export_facility_layout_json(
 
 1. Download `blenddcmcp_v3.0.0.zip` from the [Releases](../../releases) page
 2. Open Blender → **Edit → Preferences → Add-ons → Install…**
-3. Select the zip → enable **BlendDC-MCP - Datacenter Asset Factory for UPTIME**
+3. Select the zip → enable **BlendDC-MCP - Datacenter Asset Factory**
 
 ### Option B — Build from source
 
@@ -165,17 +163,17 @@ A full integration test validates the pipeline end-to-end — facility creation 
 
 ```bash
 # Start the server in Blender first, then from a terminal:
-python3 tests/full_uptime_pipeline_test.py
+python3 tests/full_pipeline_test.py
 
 # Override the export directory:
-OUTPUT_DIR=~/Desktop/uptime_test python3 tests/full_uptime_pipeline_test.py
+OUTPUT_DIR=~/Desktop/blenddc_test python3 tests/full_pipeline_test.py
 ```
 
 The test runner covers 7 phases and prints `[PASS]` / `[WARN]` / `[FAIL]` per check with timing and a final summary. Requires only the Python standard library — no extra packages.
 
 ```
 ══════════════════════════════════════════════════════════════════════
-  UPTIME PIPELINE TEST SUMMARY   (14.3s total)
+  BlendDC PIPELINE TEST SUMMARY   (14.3s total)
 ══════════════════════════════════════════════════════════════════════
   Passed :  47
   Warned :   3
@@ -207,8 +205,8 @@ BlendDC-MCP/
 │       ├── facility_tools.py      # 11 facility layout + export tools
 │       └── polish_tools.py        # 12 polish, UX, safety + documentation tools
 ├── tests/
-│   ├── uptime_pipeline_test.py       # In-Blender test (Scripting workspace)
-│   └── full_uptime_pipeline_test.py  # External integration test (v3.0.0)
+│   ├── pipeline_test.py           # In-Blender test (Scripting workspace)
+│   └── full_pipeline_test.py      # External integration test (v3.0.0)
 ├── docs/
 │   └── tool_reference.md          # Full 189-tool reference (auto-generated)
 ├── build_addon.py
@@ -245,13 +243,11 @@ See the current reference: [docs/tool_reference.md](docs/tool_reference.md)
 
 ---
 
-## Built for UPTIME
+## Design Goals
 
-BlendDC-MCP was designed for a single purpose: building the asset pipeline for **UPTIME**, a UE5 game where players operate and expand a real-scale datacenter.
+BlendDC-MCP is a general-purpose datacenter asset factory. Every design decision reflects real-world accuracy:
 
-Every design decision reflects that goal:
-
-- **Real-world dimensions** — racks, equipment, cables, and aisles match actual datacenter specifications so gameplay feels physically accurate
+- **Real-world dimensions** — racks, equipment, cables, and aisles match actual datacenter specifications (EIA-310, TIA-942)
 - **Variation system** — aged equipment, post-incident failure states, and hot-zone wear gradients give each section a believable history
 - **UE5-first export** — `SOCKET_` attachment points, LOD sets, manifests, and spline-ready cable control points are designed for UE5's StaticMesh and PCG workflows
 - **Facility-scale output** — a single `create_facility_section` call produces a complete, populated, variation-dressed section ready for UE5 level import

@@ -1,10 +1,10 @@
 bl_info = {
-    "name": "BlendDC-MCP - Datacenter Asset Factory for UPTIME",
+    "name": "BlendDC-MCP - Datacenter Asset Factory",
     "author": "DaRealDaHoodie",
     "version": (3, 0, 0),
     "blender": (4, 0, 0),
     "location": "View3D > N-Panel > BlendDC-MCP",
-    "description": "Complete production pipeline for realistic datacenter racks, equipment, cabling, materials, variation, failure states, and full facility sections. Built specifically for the UE5 game UPTIME.",
+    "description": "Complete production pipeline for realistic datacenter racks, equipment, cabling, materials, variation, failure states, and full facility sections.",
     "warning": "",
     "doc_url": "https://github.com/DaRealDaHoodie/BlendDC-MCP",
     "category": "Add Mesh",

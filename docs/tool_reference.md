@@ -188,7 +188,7 @@ foundation that all domain modules build on.
 
 ### `get_scene_inventory`
 
-Walk the entire Blender scene and return a structured tally of everything the UPTIME pipeline has created.
+Walk the entire Blender scene and return a structured tally of everything the BlendDC pipeline has created.
 
 Call this at the start of every session to orient yourself before issuing further commands.
 
@@ -238,7 +238,7 @@ Push a named undo step onto Blender's undo stack.
 
 | Parameter | Type | Default | Req | Description |
 |---|---|---|:---:|---|
-| `label` | `string` | `"UPTIME checkpoint"` | | Displayed in Blender's Edit → Undo History |
+| `label` | `string` | `"BlendDC checkpoint"` | | Displayed in Blender's Edit → Undo History |
 
 ---
 
@@ -308,7 +308,7 @@ Filename format: `{original_stem}_{YYYYMMDD_HHMMSS}[_{label}].blend`
 
 ### `validate_entire_scene`
 
-One-call health check across every UPTIME structure in the current scene.
+One-call health check across every BlendDC structure in the current scene.
 
 Runs `validate_facility` per `Facility_` collection, `validate_cable_routing` scene-wide, and checks for rack cabinets outside any bay hierarchy.
 

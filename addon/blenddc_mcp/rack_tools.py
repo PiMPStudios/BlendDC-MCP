@@ -1,5 +1,5 @@
 """
-Rack cabinet generation and management tools for the UPTIME datacenter simulator.
+Rack cabinet generation and management tools for the BlendDC asset pipeline.
 
 Coordinate convention (origin at base-front-centre):
   X = rack centreline  (negative = left,  positive = right)

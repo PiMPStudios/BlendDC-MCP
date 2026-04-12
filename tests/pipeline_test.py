@@ -1,5 +1,5 @@
 """
-UPTIME Full Pipeline Test — Universal Blender MCP v2.2.0
+BlendDC Full Pipeline Test — Universal Blender MCP v2.2.0
 =========================================================
 Run this script in Blender's Scripting workspace (Text Editor → Run Script).
 
@@ -49,7 +49,7 @@ import traceback
 
 # ── Configuration ──────────────────────────────────────────────────────────
 # Change OUTPUT_DIR to your UE5 Content directory, or leave as temp for testing.
-OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "uptime_test_export")
+OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "blenddc_test_export")
 RACK_NAME  = "TestRack"
 PRESET     = "mixed_dc"   # "server_dense" | "spine_leaf" | "mixed_dc"
 
@@ -134,7 +134,7 @@ def run_pipeline_test():
     global _pass_count, _fail_count
 
     print("\n" + "═" * 60)
-    print("  UPTIME Pipeline Test — Universal Blender MCP v2.2.0")
+    print("  BlendDC Pipeline Test — Universal Blender MCP v2.2.0")
     print("═" * 60)
 
     rt, et, eqt = _import_tools()

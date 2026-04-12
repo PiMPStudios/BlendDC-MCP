@@ -873,7 +873,7 @@ def export_scene_manifest(
     collection_name: str = "",
 ) -> Dict[str, Any]:
     """
-    Write a JSON manifest of exported assets for the UPTIME asset registry.
+    Write a JSON manifest of exported assets for the asset registry.
 
     Captures per-object data: name, triangle count, bounding box, world
     location, collection membership, and rack metadata (if present).

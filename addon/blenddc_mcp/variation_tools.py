@@ -1,5 +1,5 @@
 """
-Advanced variation, wear, failure-state, and theme tools for the UPTIME datacenter simulator.
+Advanced variation, wear, failure-state, and theme tools for the BlendDC asset pipeline.
 
 All variation is non-destructive: wear/dust/damage layers are injected as labelled
 node groups into existing material trees so they can be found and removed cleanly
