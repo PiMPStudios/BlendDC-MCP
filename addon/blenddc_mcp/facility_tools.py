@@ -163,7 +163,6 @@ def _create_raised_floor(
     parent_col: bpy.types.Collection,
     tile_type: str = 'solid',
     join_zone: bool = True,
-    perforated_bands: Optional[List[Tuple[float, float]]] = None,
 ) -> None:
     """
     Create a Tate-style raised floor system in the specified XY zone.
@@ -177,19 +176,13 @@ def _create_raised_floor(
       head:    Z 0.444 → 0.450
       tile:    Z 0.425 → 0.450  (25 mm tile, flush with head top)
 
-    zone_name:        unique name prefix for this floor zone
-    x0, y0:          world XY of the zone's bottom-left corner (min X, min Y)
-    width:            zone extent in X metres
-    depth:            zone extent in Y metres
-    parent_col:       collection to nest the raised-floor sub-collection into
-    tile_type:        default tile type — 'solid' or 'perforated'
-    join_zone:        if True, merge all part meshes into a single joined object
-    perforated_bands: optional list of (world_y_min, world_y_max) ranges;
-                      any tile whose centre falls inside a band is forced to
-                      'perforated' regardless of tile_type.  Use this to mark
-                      cold-aisle strips in a unified floor zone without needing
-                      separate zone calls (which would leave seam gaps when zone
-                      depth is not a multiple of RF_GRID_M=0.6 m).
+    zone_name:  unique name prefix for this floor zone (avoids object name collisions)
+    x0, y0:    world XY of the zone's bottom-left corner (min X, min Y)
+    width:     zone extent in X metres
+    depth:     zone extent in Y metres
+    parent_col: collection to nest the raised-floor sub-collection into
+    tile_type: 'solid' (standard tile) or 'perforated' (open-centre grate frame)
+    join_zone: if True, merge all part meshes into a single joined object
     """
     rf_col = _get_or_create_collection(zone_name)
     _nest_collection(rf_col, parent_col)
@@ -199,11 +192,11 @@ def _create_raised_floor(
     ny = max(2, _math.floor(depth  / RF_GRID_M) + 1)
 
     # Z centres — positive, slab at 0
-    base_cz     = RF_PEDESTAL_BASE_H_M / 2
-    shaft_cz    = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M / 2
-    head_cz     = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M + RF_PEDESTAL_HEAD_H_M / 2
+    base_cz     = RF_PEDESTAL_BASE_H_M / 2                                          # 0.003
+    shaft_cz    = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M / 2                  # 0.225
+    head_cz     = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M + RF_PEDESTAL_HEAD_H_M / 2  # 0.447
     stringer_cz = head_cz
-    tile_cz     = RF_PEDESTAL_TOTAL_H_M - RF_TILE_H_M / 2
+    tile_cz     = RF_PEDESTAL_TOTAL_H_M - RF_TILE_H_M / 2                           # 0.4375
 
     part_objects: List[bpy.types.Object] = []
 
@@ -247,9 +240,9 @@ def _create_raised_floor(
 
     # ── Floor tiles ────────────────────────────────────────────────────────
     tile_gap = RF_TILE_GROUT_M
-    tw       = RF_TILE_W_M - tile_gap
-    td       = RF_TILE_D_M - tile_gap
-    fw       = 0.020   # 20 mm perforated tile frame border
+    tw       = RF_TILE_W_M - tile_gap   # 596 mm
+    td       = RF_TILE_D_M - tile_gap   # 596 mm
+    fw       = 0.020                    # 20 mm perforated tile frame border
 
     for iy in range(ny - 1):
         for ix in range(nx - 1):
@@ -257,20 +250,12 @@ def _create_raised_floor(
             tcy = y0 + iy * RF_GRID_M + RF_GRID_M / 2
             n   = ix + iy * (nx - 1)
 
-            # Resolve tile type: band override takes priority over zone default
-            this_type = tile_type
-            if perforated_bands:
-                for band_y0, band_y1 in perforated_bands:
-                    if band_y0 <= tcy <= band_y1:
-                        this_type = 'perforated'
-                        break
-
-            if this_type == 'perforated':
+            if tile_type == 'perforated':
                 # Open-centre grate: four border strips, hole in middle
-                _box(f"{zone_name}_tile_{n}_N", tcx,                   tcy + (td - fw) / 2, tile_cz, tw,          fw,          RF_TILE_H_M)
-                _box(f"{zone_name}_tile_{n}_S", tcx,                   tcy - (td - fw) / 2, tile_cz, tw,          fw,          RF_TILE_H_M)
-                _box(f"{zone_name}_tile_{n}_E", tcx + (tw - fw) / 2,   tcy,                 tile_cz, fw,          td - 2 * fw, RF_TILE_H_M)
-                _box(f"{zone_name}_tile_{n}_W", tcx - (tw - fw) / 2,   tcy,                 tile_cz, fw,          td - 2 * fw, RF_TILE_H_M)
+                _box(f"{zone_name}_tile_{n}_N", tcx,  tcy + (td - fw) / 2,  tile_cz, tw,         fw,             RF_TILE_H_M)
+                _box(f"{zone_name}_tile_{n}_S", tcx,  tcy - (td - fw) / 2,  tile_cz, tw,         fw,             RF_TILE_H_M)
+                _box(f"{zone_name}_tile_{n}_E", tcx + (tw - fw) / 2, tcy,   tile_cz, fw,         td - 2 * fw,    RF_TILE_H_M)
+                _box(f"{zone_name}_tile_{n}_W", tcx - (tw - fw) / 2, tcy,   tile_cz, fw,         td - 2 * fw,    RF_TILE_H_M)
             else:
                 _box(f"{zone_name}_tile_{n}", tcx, tcy, tile_cz, tw, td, RF_TILE_H_M)
 
@@ -449,30 +434,74 @@ def create_facility_section(
     rf_parent_col      = _get_or_create_collection(rf_parent_col_name)
     _nest_collection(rf_parent_col, facility_col)
 
-    # One unified floor zone covering everything: front corridor → rear corridor.
-    # Using a single zone eliminates seam gaps that occur when zone depth is not
-    # a multiple of RF_GRID_M (0.6 m).  Cold-aisle bands are passed as world-Y
-    # ranges so tiles whose centres fall inside get the perforated type.
+    floor_x0 = start_x_m
+    floor_w  = slab_w
+    zone_idx = 0
 
-    last_by_r = start_y_m + rack_d_m + (bays_y - 1) * bay_step_y
-    floor_y0    = start_y_m - corridor_depth_m
-    floor_depth = (last_by_r + aisle_m + rack_d_m + corridor_depth_m) - floor_y0
+    # Front corridor (before first row)
+    _create_raised_floor(
+        zone_name=f"{section_name}_RF_{zone_idx:03d}_corridor_front",
+        x0=floor_x0, y0=start_y_m - corridor_depth_m,
+        width=floor_w, depth=corridor_depth_m,
+        parent_col=rf_parent_col,
+        tile_type='solid', join_zone=True,
+    )
+    zone_idx += 1
 
-    # Build cold-aisle Y bands in world coordinates
-    cold_bands: List[Tuple[float, float]] = []
     for row in range(bays_y):
         by_r = start_y_m + rack_d_m + row * bay_step_y
-        cold_bands.append((by_r, by_r + aisle_m))
 
+        # Row_A footprint (solid tiles — under rack cabinets)
+        _create_raised_floor(
+            zone_name=f"{section_name}_RF_{zone_idx:03d}_rowA_{row}",
+            x0=floor_x0, y0=by_r - rack_d_m,
+            width=floor_w, depth=rack_d_m,
+            parent_col=rf_parent_col,
+            tile_type='solid', join_zone=True,
+        )
+        zone_idx += 1
+
+        # Cold aisle (perforated/grate tiles — cold air rises from plenum)
+        _create_raised_floor(
+            zone_name=f"{section_name}_RF_{zone_idx:03d}_cold_{row}",
+            x0=floor_x0, y0=by_r,
+            width=floor_w, depth=aisle_m,
+            parent_col=rf_parent_col,
+            tile_type='perforated', join_zone=True,
+        )
+        zone_idx += 1
+
+        # Row_B footprint (solid tiles — under rack cabinets)
+        _create_raised_floor(
+            zone_name=f"{section_name}_RF_{zone_idx:03d}_rowB_{row}",
+            x0=floor_x0, y0=by_r + aisle_m,
+            width=floor_w, depth=rack_d_m,
+            parent_col=rf_parent_col,
+            tile_type='solid', join_zone=True,
+        )
+        zone_idx += 1
+
+        # Hot aisle between this row and the next (solid tiles)
+        if row < bays_y - 1:
+            _create_raised_floor(
+                zone_name=f"{section_name}_RF_{zone_idx:03d}_hot_{row}",
+                x0=floor_x0, y0=by_r + aisle_m + rack_d_m,
+                width=floor_w, depth=hot_aisle_m + bay_spacing_y_m,
+                parent_col=rf_parent_col,
+                tile_type='solid', join_zone=True,
+            )
+            zone_idx += 1
+
+    # Rear corridor (after last row)
+    last_by_r = start_y_m + rack_d_m + (bays_y - 1) * bay_step_y
     _create_raised_floor(
-        zone_name=f"{section_name}_RF_Floor",
-        x0=start_x_m, y0=floor_y0,
-        width=slab_w, depth=floor_depth,
+        zone_name=f"{section_name}_RF_{zone_idx:03d}_corridor_rear",
+        x0=floor_x0, y0=last_by_r + aisle_m + rack_d_m,
+        width=floor_w, depth=corridor_depth_m,
         parent_col=rf_parent_col,
-        tile_type='solid',
-        join_zone=True,
-        perforated_bands=cold_bands,
+        tile_type='solid', join_zone=True,
     )
+    zone_idx += 1
 
     # ── Perimeter walls ───────────────────────────────────────────────────
     wall_names: List[str] = []
