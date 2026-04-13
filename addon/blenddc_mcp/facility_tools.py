@@ -52,6 +52,7 @@ from constants import (
     RF_GRID_M,
     RF_STRINGER_W_M, RF_STRINGER_H_M,
     RF_TILE_W_M, RF_TILE_D_M, RF_TILE_H_M, RF_TILE_GROUT_M,
+    QUALITY_TIERS,
 )
 
 
@@ -351,6 +352,7 @@ def create_raised_floor(
     floor_width_m: float = 0.0,
     floor_depth_m: float = 0.0,
     margin_mm: float = 600.0,
+    quality: str = "high",
 ) -> Dict[str, Any]:
     """
     Generate a single-mesh raised floor with automatic cold/hot aisle tile
@@ -400,6 +402,9 @@ def create_raised_floor(
     cold_m        = cold_aisle_depth_mm / 1000.0
     hot_m         = hot_aisle_depth_mm / 1000.0
     margin_m      = margin_mm / 1000.0
+
+    # ── Quality flags ──────────────────────────────────────────────────────
+    qf = QUALITY_TIERS.get(quality, QUALITY_TIERS["high"])
 
     # ── 1. Build rack_rows list if not supplied ────────────────────────────
     # Layout is built around FRONT FACE positions so cold-aisle boundaries
@@ -489,6 +494,9 @@ def create_raised_floor(
         # Rack check: center-based prevents tiles whose center is under the rack body
         # from being perforated. The ~200 mm overlap at the rack front face is hidden
         # under the rack enclosure from any normal viewing angle.
+        # medium/low: always solid (bake or single-mesh path handles appearance).
+        if not qf["floor_perforated"]:
+            return "solid"
         tcx = fx0 + (ix + 0.5) * RF_GRID_M
         tcy = fy0 + (iy + 0.5) * RF_GRID_M
         for row in rack_rows:
@@ -533,30 +541,37 @@ def create_raised_floor(
             _box(fx0 + ix * RF_GRID_M, fy0 + (iy + 0.5) * RF_GRID_M,
                  head_cz, RF_STRINGER_W_M, span, RF_STRINGER_H_M)
 
-    # Tiles
-    perf_bar   = 0.015
-    perf_gap   = 0.015
-    perf_pitch = perf_bar + perf_gap
+    if qf["floor_single_mesh"]:
+        # low quality: one large flat slab covering the entire floor extent.
+        # Pedestals and stringers are also skipped — bm is empty at this point.
+        slab_cx = fx0 + floor_width_m / 2
+        slab_cy = fy0 + floor_depth_m / 2
+        _box(slab_cx, slab_cy, tile_cz, floor_width_m, floor_depth_m, RF_TILE_H_M)
+    else:
+        # ── Per-tile generation (ultra / high / medium) ──────────────────
+        perf_bar   = 0.015
+        perf_gap   = 0.015
+        perf_pitch = perf_bar + perf_gap
 
-    for iy in range(ny):
-        for ix in range(nx):
-            tcx   = fx0 + (ix + 0.5) * RF_GRID_M
-            tcy   = fy0 + (iy + 0.5) * RF_GRID_M
-            ttype = _tile_type(ix, iy)
+        for iy in range(ny):
+            for ix in range(nx):
+                tcx   = fx0 + (ix + 0.5) * RF_GRID_M
+                tcy   = fy0 + (iy + 0.5) * RF_GRID_M
+                ttype = _tile_type(ix, iy)
 
-            if ttype == "solid":
-                _box(tcx, tcy, tile_cz, tw, td, RF_TILE_H_M)
-            else:
-                # Perforated — Tate PERF 1250 waffle grid
-                n_pb  = int(tw / perf_pitch)
-                p_off = (tw - n_pb * perf_pitch) / 2.0
-                for k in range(n_pb):
-                    # X-running bar (full tile width, stepped in Y)
-                    by = tcy - tw / 2 + p_off + perf_bar / 2 + k * perf_pitch
-                    _box(tcx, by, tile_cz, tw, perf_bar, RF_TILE_H_M)
-                    # Y-running bar (full tile depth, stepped in X)
-                    bx = tcx - td / 2 + p_off + perf_bar / 2 + k * perf_pitch
-                    _box(bx, tcy, tile_cz, perf_bar, td, RF_TILE_H_M)
+                if ttype == "solid":
+                    _box(tcx, tcy, tile_cz, tw, td, RF_TILE_H_M)
+                else:
+                    # Perforated — Tate PERF 1250 waffle grid
+                    n_pb  = int(tw / perf_pitch)
+                    p_off = (tw - n_pb * perf_pitch) / 2.0
+                    for k in range(n_pb):
+                        # X-running bar (full tile width, stepped in Y)
+                        by = tcy - tw / 2 + p_off + perf_bar / 2 + k * perf_pitch
+                        _box(tcx, by, tile_cz, tw, perf_bar, RF_TILE_H_M)
+                        # Y-running bar (full tile depth, stepped in X)
+                        bx = tcx - td / 2 + p_off + perf_bar / 2 + k * perf_pitch
+                        _box(bx, tcy, tile_cz, perf_bar, td, RF_TILE_H_M)
 
     # ── 6. Create single mesh object ───────────────────────────────────────
     col = _get_or_create_collection(name)
@@ -574,6 +589,42 @@ def create_raised_floor(
     obj["rf_ny"]             = ny
     obj["rf_cold_zones"]     = str(cold_zones)
     obj["rf_finished_floor"] = round(RF_PEDESTAL_TOTAL_H_M, 4)
+    obj["quality"]           = quality
+
+    if qf["floor_single_mesh"]:
+        # low quality: add a procedural grid bump material so the single slab
+        # hints at tile boundaries in viewport. UE5 should replace this with a
+        # baked normal map texture tagged via the grid_normal_map custom property.
+        obj["grid_normal_map"] = True
+        obj["grid_pitch_m"]    = RF_GRID_M
+        mat = bpy.data.materials.new(f"{name}_GridBump")
+        mat.use_nodes = True
+        nt   = mat.node_tree
+        bsdf = nt.nodes.get("Principled BSDF")
+        # Wave texture set to bands on both axes → grid pattern
+        wave_x = nt.nodes.new("ShaderNodeTexWave")
+        wave_x.wave_type   = "BANDS"
+        wave_x.bands_direction = "X"
+        wave_x.inputs["Scale"].default_value   = 1.0 / RF_GRID_M
+        wave_x.inputs["Distortion"].default_value = 0.0
+        wave_y = nt.nodes.new("ShaderNodeTexWave")
+        wave_y.wave_type   = "BANDS"
+        wave_y.bands_direction = "Y"
+        wave_y.inputs["Scale"].default_value   = 1.0 / RF_GRID_M
+        wave_y.inputs["Distortion"].default_value = 0.0
+        add_node = nt.nodes.new("ShaderNodeMath")
+        add_node.operation = "ADD"
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value  = 0.15
+        bump.inputs["Distance"].default_value  = 0.003
+        nt.links.new(wave_x.outputs["Color"],  add_node.inputs[0])
+        nt.links.new(wave_y.outputs["Color"],  add_node.inputs[1])
+        nt.links.new(add_node.outputs["Value"], bump.inputs["Height"])
+        if bsdf:
+            nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+            bsdf.inputs["Base Color"].default_value = (0.55, 0.55, 0.55, 1.0)
+            bsdf.inputs["Roughness"].default_value  = 0.55
+        obj.data.materials.append(mat)
 
     # ── 7. Build rack placement data ──────────────────────────────────────
     # For each row, emit one slot entry per rack column so callers can drive

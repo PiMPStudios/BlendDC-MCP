@@ -39,6 +39,7 @@ from constants import (
     EIA_HOLE_INSET_M,
     RACK_SETBACK_FRONT_M, RACK_SETBACK_REAR_M,
     EAR_SETBACK_M,
+    QUALITY_TIERS,
     HINGE_PIN_DIAM_M, HINGE_PIN_HEIGHT_M, HINGE_COUNT_PER_DOOR,
     LATCH_WIDTH_M, LATCH_HEIGHT_M, LATCH_DEPTH_M,
     ANCHOR_INSET_M,
@@ -550,6 +551,7 @@ def create_rack_cabinet(
     join_mesh: bool = True,
     eia_holes: bool = True,
     lod_rails: bool = True,
+    quality: str = "high",
 ) -> Dict[str, Any]:
     """
     Generate a parametric 4-post enclosed server rack cabinet.
@@ -614,6 +616,15 @@ def create_rack_cabinet(
     post_cy_f = ps / 2                     # front bracket Y centre
     post_cy_r = d - ps / 2                 # rear bracket / crossbar Y centre
 
+    # ── Resolve quality flags ──────────────────────────────────────────────
+    qf = QUALITY_TIERS.get(quality, QUALITY_TIERS["high"])
+    # quality overrides explicit bool params so callers can pass quality="low"
+    # without needing to specify every sub-flag individually.
+    eia_holes        = qf["eia_holes"]
+    lod_rails        = qf["lod_rails"]
+    include_fan_tray = include_fan_tray and qf["fan_tray"]
+    include_crossbars = include_crossbars and qf["crossbars"]
+
     warnings: List[str] = []
     if half_outer + rt > w / 2:
         warnings.append(
@@ -649,6 +660,7 @@ def create_rack_cabinet(
     col["rack_has_fan_tray"]     = include_fan_tray
     col["rack_has_crossbars"]    = include_crossbars
     col["is_rack_cabinet"]       = True
+    col["quality"]               = quality
 
     frame_objs: List[bpy.types.Object] = []   # open-frame skeleton → _Body
     shell_objs: List[bpy.types.Object] = []   # enclosure skin      → _Shell
@@ -720,7 +732,13 @@ def create_rack_cabinet(
             u_height=u_height,
         )
         frame_objs.append(parts["web"])
-        rail_objs.extend(parts["flange_parts"])
+        # low quality: web posts only — no separate rail flanges
+        if qf["rack_rails"]:
+            rail_objs.extend(parts["flange_parts"])
+        else:
+            # discard flange objects — not needed for box-proxy quality
+            for fp in parts["flange_parts"]:
+                bpy.data.objects.remove(fp, do_unlink=True)
 
     # ── Structural side crossbars ──────────────────────────────────────────
     # Four horizontal bars (two per side) running front-to-back on each side of
@@ -853,11 +871,14 @@ def create_rack_cabinet(
     # its correct world position in the final combined mesh.  The resulting
     # joined object is placed at location (0, 0, 0) — its origin IS already the
     # base-front-centre without any cursor trick needed.
-    if join_mesh and frame_objs and rail_objs:
+    has_rails = bool(rail_objs)   # capture before _bmesh_join consumes the list
+    if join_mesh and frame_objs:
         # Join open-frame parts → {col_name}_Body
         _bmesh_join(col_name + "_Body", frame_objs, col)
         # Join rail parts → {col_name}_Rails  (LOD0: full EIA-310 through-holes)
-        _bmesh_join(col_name + "_Rails", rail_objs, col)
+        # Skipped for low quality where rail_objs is empty.
+        if rail_objs:
+            _bmesh_join(col_name + "_Rails", rail_objs, col)
         # Join enclosure parts → {col_name}_Shell  (only if any shell parts exist)
         if shell_objs:
             _bmesh_join(col_name + "_Shell", shell_objs, col)
@@ -911,8 +932,9 @@ def create_rack_cabinet(
         "joined":            join_mesh,
         "body_object":       col_name + "_Body"  if join_mesh else None,
         "shell_object":      col_name + "_Shell" if has_shell  else None,
-        "rails_object":      col_name + "_Rails" if join_mesh else None,
-        "rails_lod1_object": col_name + "_Rails_LOD1" if (join_mesh and lod_rails and eia_holes) else None,
+        "rails_object":      col_name + "_Rails" if (join_mesh and has_rails) else None,
+        "rails_lod1_object": col_name + "_Rails_LOD1" if (join_mesh and has_rails and lod_rails and eia_holes) else None,
+        "quality":           quality,
         "sockets":           sockets,
         "u_height":          u_height,
         "external_dimensions_mm": {

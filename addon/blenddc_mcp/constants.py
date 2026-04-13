@@ -180,3 +180,85 @@ TRAPEZE_BAR_OVERHANG_M    = 0.040   # bar extends 40 mm past each tray wall
 # ── Structural crossbars ──────────────────────────────────────────────────
 RACK_CROSSBAR_H_M = 0.030   # 30 mm tall horizontal structural crossbar
 RACK_CROSSBAR_T_M = 0.004   # 4 mm thick
+
+# ── Quality tiers — single source of truth ────────────────────────────────
+# Each tier maps to a flat dict of feature flags consumed by create_rack_cabinet,
+# create_server_chassis, create_network_switch, create_patch_panel,
+# create_raised_floor, and export_rack_collection_ue5.
+#
+# Tiers in descending detail order:
+#   ultra  → hero-quality, maximum geometry, no compromises
+#   high   → default; detailed but not hero (current historical behaviour)
+#   medium → balanced; suitable for mid-distance rendering
+#   low    → performance; box proxies + single-mesh floor for far-LOD / mobile
+QUALITY_TIERS: dict = {
+    "ultra": {
+        # Rack rails
+        "eia_holes":         True,   # full EIA-310 punched through-holes
+        "lod_rails":         True,   # also emit _Rails_LOD1 solid variant
+        "rack_rails":        True,   # include rail flanges at all
+        # Rack structural
+        "fan_tray":          True,
+        "crossbars":         True,
+        # Server / switch bezel & detail
+        "bezel":             True,   # top/bottom/right bezel frame strips
+        "server_bays":       True,   # drive bay surrounds on server bezel
+        "bay_3d":            True,   # deep 8 mm bay housing recesses (ultra only)
+        "vents":             True,   # side ventilation louvre strips
+        "grille":            True,   # rear exhaust tile grille
+        "ear_screws":        True,   # visible screw head bumps on mounting ears
+        # Floor
+        "floor_perforated":  True,   # waffle-grid perforated tiles in cold aisles
+        "floor_single_mesh": False,  # collapse entire floor to one flat mesh
+        # Export
+        "lod_level":         0,
+    },
+    "high": {
+        "eia_holes":         True,
+        "lod_rails":         True,
+        "rack_rails":        True,
+        "fan_tray":          True,
+        "crossbars":         True,
+        "bezel":             True,
+        "server_bays":       True,
+        "bay_3d":            False,  # flat bay faces (no deep housing)
+        "vents":             True,
+        "grille":            True,
+        "ear_screws":        False,
+        "floor_perforated":  True,
+        "floor_single_mesh": False,
+        "lod_level":         1,
+    },
+    "medium": {
+        "eia_holes":         False,  # solid rail flanges
+        "lod_rails":         False,
+        "rack_rails":        True,
+        "fan_tray":          True,
+        "crossbars":         True,
+        "bezel":             True,
+        "server_bays":       True,   # basic flat bays, no deep recesses
+        "bay_3d":            False,
+        "vents":             False,
+        "grille":            False,
+        "ear_screws":        False,
+        "floor_perforated":  False,  # all tiles solid (bake-ready)
+        "floor_single_mesh": False,
+        "lod_level":         2,
+    },
+    "low": {
+        "eia_holes":         False,
+        "lod_rails":         False,
+        "rack_rails":        False,  # no mounting rails at all
+        "fan_tray":          False,
+        "crossbars":         False,
+        "bezel":             False,
+        "server_bays":       False,
+        "bay_3d":            False,
+        "vents":             False,
+        "grille":            False,
+        "ear_screws":        False,
+        "floor_perforated":  False,
+        "floor_single_mesh": True,   # single flat slab + grid normal map hint
+        "lod_level":         3,
+    },
+}

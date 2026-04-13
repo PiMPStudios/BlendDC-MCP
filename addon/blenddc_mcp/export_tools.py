@@ -947,6 +947,7 @@ def export_rack_collection_ue5(
     lod1_ratio: float = LOD1_DEFAULT_RATIO,
     lod2_ratio: float = LOD2_DEFAULT_RATIO,
     write_manifest: bool = True,
+    quality: str = "",
 ) -> Dict[str, Any]:
     """
     One-call full UE5 export pipeline for a rack cabinet collection.
@@ -977,7 +978,15 @@ def export_rack_collection_ue5(
         )
     os.makedirs(output_dir, exist_ok=True)
 
-    report = {"collection": collection_name, "steps": []}
+    # Resolve quality: explicit param > collection property > default "high"
+    if not quality:
+        col_obj = bpy.data.collections.get(collection_name)
+        quality = (col_obj.get("quality") or "high") if col_obj else "high"
+    # medium/low are already simplified — skip decimate LOD generation
+    if quality in ("medium", "low"):
+        generate_lods = False
+
+    report = {"collection": collection_name, "steps": [], "quality": quality}
 
     # Step 1: Validate
     validation = validate_rack_collection(collection_name)
@@ -991,8 +1000,9 @@ def export_rack_collection_ue5(
     apply_ue5_transforms(collection_name=collection_name)
     report["steps"].append({"step": "apply_transforms", "done": True})
 
-    # Step 3: Export main FBX
+    # Step 3: Export main FBX — append quality suffix to asset name
     safe_name = "".join(c if (c.isalnum() or c in "._-") else "_" for c in collection_name)
+    safe_name = f"{safe_name}_quality_{quality}"
     fbx_path  = os.path.join(output_dir, f"{safe_name}.fbx")
     export_ue5_fbx(output_path=fbx_path, collection_name=collection_name)
     report["steps"].append({"step": "export_fbx", "path": fbx_path})
