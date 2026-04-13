@@ -38,6 +38,7 @@ from constants import (
     RACK_INNER_CLEAR_M,
     EIA_HOLE_INSET_M,
     RACK_SETBACK_FRONT_M, RACK_SETBACK_REAR_M,
+    EAR_SETBACK_M,
     HINGE_PIN_DIAM_M, HINGE_PIN_HEIGHT_M, HINGE_COUNT_PER_DOOR,
     LATCH_WIDTH_M, LATCH_HEIGHT_M, LATCH_DEPTH_M,
     ANCHOR_INSET_M,
@@ -1091,16 +1092,22 @@ def snap_to_rack_u(
     z_bot  = bh + (u_slot - 1) * RACK_U_M
     z_ctr  = z_bot + (u_size * RACK_U_M) / 2
 
+    # EAR_SETBACK_M: push the server 2.5 mm deeper than the rail front face so the
+    # mounting ear rests ON the flange with a subtle shoulder rather than sitting
+    # perfectly flush (ear back at rail face + 2.5 mm, ear front still protrudes).
+    rail_y     = pos["centre"][1]
+    mount_y    = rail_y + EAR_SETBACK_M
+
     # Convert rack-local position to world space using the rack Body's matrix_world.
     # This handles racks at any world position or Z rotation (e.g. 180° Row B).
     rack_body = bpy.data.objects.get(f"{collection_name}_Body")
     if rack_body:
-        local_pos = mathutils.Vector((x_offset, pos["centre"][1], z_ctr))
+        local_pos = mathutils.Vector((x_offset, mount_y, z_ctr))
         obj.location = rack_body.matrix_world @ local_pos
         obj.rotation_euler.z = rack_body.rotation_euler.z
     else:
         obj.location.x = x_offset
-        obj.location.y = pos["centre"][1]
+        obj.location.y = mount_y
         obj.location.z = z_ctr
 
     return {

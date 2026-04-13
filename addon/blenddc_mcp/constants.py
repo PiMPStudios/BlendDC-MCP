@@ -76,6 +76,11 @@ RACK_SETBACK_FRONT_M  = 0.075
 RACK_SETBACK_REAR_MM  = 125.0
 RACK_SETBACK_REAR_M   = 0.125
 
+# Ear shoulder setback — server is placed 2.5 mm deeper than the rail front face
+# so the ear rests ON the flange with a subtle shoulder rather than sitting flush.
+EAR_SETBACK_MM = 2.5
+EAR_SETBACK_M  = 0.0025
+
 # ── Door hardware ──────────────────────────────────────────────────────────
 HINGE_PIN_DIAM_M   = 0.008  # 8 mm diameter hinge pin
 HINGE_PIN_HEIGHT_M = 0.020  # 20 mm tall pin stub geometry
