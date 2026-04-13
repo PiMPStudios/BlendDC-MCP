@@ -190,129 +190,252 @@ def create_server_chassis(
     )
     parts.append(chassis)
 
-    if qf["bezel"]:
-        # ── Bezel frame strips (proud of chassis face — negative y) ───────
-        # Origin is front-face-bottom-centre: y=0 is the front face, negative y
-        # is proud (toward the aisle), positive y goes into the chassis.
-        bz_y = -st / 2   # centre 1 mm proud of face
-        bz_d = st         # 2 mm deep
-
-        # Top border strip
-        bz_top = _create_box_object(
-            f"{name}_bz_top",
-            cx=0.0, cy=bz_y, cz=h - h * 0.08,
-            w=w - 0.006, d=bz_d, h=h * 0.12,
-            collection=col,
-        )
-        parts.append(bz_top)
-
-        # Bottom border strip
-        bz_bot = _create_box_object(
-            f"{name}_bz_bot",
-            cx=0.0, cy=bz_y, cz=h * 0.08,
-            w=w - 0.006, d=bz_d, h=h * 0.12,
-            collection=col,
-        )
-        parts.append(bz_bot)
-
-        # Right panel (LED / controls area — rightmost 14% of width)
-        bz_right = _create_box_object(
-            f"{name}_bz_right",
-            cx=w * 0.39, cy=bz_y, cz=h / 2,
-            w=w * 0.14, d=bz_d, h=h - 0.004,
-            collection=col,
-        )
-        parts.append(bz_right)
-
     actual_bays = 0
-    if qf["server_bays"]:
-        # ── Drive bay assemblies (left 58% of bezel face) ─────────────────
-        actual_bays = drive_bays
-        if random_variation and drive_bays > 1:
-            actual_bays = max(1, drive_bays + _random.randint(-1, 1))
 
-        bay_area_w = w * 0.58
-        bay_x0     = -(w * 0.5) + bay_area_w / 2 - 0.01
-        # ultra: 10 mm deep 3D housing; high/medium: 6 mm flat surround
-        bay_hsg_depth = 0.010 if qf["bay_3d"] else 0.006
+    if u_size == 1:
+        # ── 1U front face: 2-row bay grid + real control cluster ──────────
+        bz_y = -st / 2
+        bz_d = st
 
-        for i in range(actual_bays):
-            bx = bay_x0 - bay_area_w / 2 + (bay_area_w / actual_bays) * (i + 0.5)
-            bx = _jitter(bx, 0.001, random_variation)
-            bay_w_single = (bay_area_w / actual_bays) - 0.002
-            bay_h_dim    = h * 0.62
-            bay_cz       = h / 2
+        if qf["bezel"]:
+            # Thin top and bottom bezel strips
+            parts.append(_create_box_object(f"{name}_bz_top",
+                cx=0.0, cy=bz_y, cz=h - h * 0.045,
+                w=w - 0.004, d=bz_d, h=h * 0.07, collection=col))
+            parts.append(_create_box_object(f"{name}_bz_bot",
+                cx=0.0, cy=bz_y, cz=h * 0.035,
+                w=w - 0.004, d=bz_d, h=h * 0.06, collection=col))
 
-            # Bay outer surround
-            bay_hsg = _create_box_object(
-                f"{name}_bay_hsg_{i:02d}",
-                cx=bx, cy=-bay_hsg_depth / 2, cz=bay_cz,
-                w=bay_w_single, d=bay_hsg_depth, h=bay_h_dim,
-                collection=col,
-            )
-            parts.append(bay_hsg)
+        if qf["server_bays"] and drive_bays > 0:
+            actual_bays = drive_bays
+            if random_variation and drive_bays > 1:
+                actual_bays = max(2, drive_bays + _random.randint(-1, 1))
+                if actual_bays % 2:
+                    actual_bays += 1  # keep even so rows are balanced
 
-            # Bay inner tray face — recessed inside housing
-            bay_tray = _create_box_object(
-                f"{name}_bay_tray_{i:02d}",
-                cx=bx, cy=-bay_hsg_depth * 0.375, cz=bay_cz,
-                w=bay_w_single * 0.84, d=bay_hsg_depth * 0.5, h=bay_h_dim * 0.80,
-                collection=col,
-            )
-            parts.append(bay_tray)
+            bay_cols = max(1, (actual_bays + 1) // 2)
+            bay_rows = 2 if actual_bays > 1 else 1
 
-            if qf["server_bays"]:
-                # Eject handle: prominent on ultra, visible tab on high/medium
-                hdl_d = 0.005 if qf["bay_3d"] else 0.003
-                bay_hdl = _create_box_object(
-                    f"{name}_bay_hdl_{i:02d}",
-                    cx=bx, cy=-bay_hsg_depth - hdl_d / 2,
-                    cz=bay_cz - bay_h_dim * 0.40,
-                    w=bay_w_single * 0.56, d=hdl_d, h=h * 0.052,
-                    collection=col,
-                )
-                parts.append(bay_hdl)
-                # Shadow-edge lip: thin overhang at handle top casts a crisp
-                # shadow line on the handle face under directional light
+            bay_left   = -(w * 0.5) + 0.015   # 15 mm from left body edge
+            bay_area_w = w * 0.70              # 70% of body width
+            bay_area_h = h * 0.78              # 78% of chassis height
+            bay_area_z0 = (h - bay_area_h) / 2
+
+            gap_x = 0.0015
+            gap_z = 0.0020
+
+            bay_w = (bay_area_w - gap_x * (bay_cols - 1)) / bay_cols
+            bay_h = (bay_area_h - gap_z * (bay_rows - 1)) / bay_rows
+
+            bay_hsg_depth = 0.008 if qf["bay_3d"] else 0.005
+
+            for row in range(bay_rows):
+                for col_i in range(bay_cols):
+                    idx = row * bay_cols + col_i
+                    if idx >= actual_bays:
+                        break
+
+                    bx = bay_left + (col_i + 0.5) * bay_w + col_i * gap_x
+                    bz = bay_area_z0 + (row + 0.5) * bay_h + row * gap_z
+                    bx = _jitter(bx, 0.0005, random_variation)
+
+                    bw     = bay_w - 0.001
+                    bh_dim = bay_h - 0.001
+
+                    # Bay outer housing
+                    parts.append(_create_box_object(f"{name}_bay_hsg_{idx:02d}",
+                        cx=bx, cy=-bay_hsg_depth / 2, cz=bz,
+                        w=bw, d=bay_hsg_depth, h=bh_dim, collection=col))
+
+                    # Bay inner tray face
+                    parts.append(_create_box_object(f"{name}_bay_tray_{idx:02d}",
+                        cx=bx, cy=-bay_hsg_depth * 0.40, cz=bz,
+                        w=bw * 0.86, d=bay_hsg_depth * 0.55, h=bh_dim * 0.82,
+                        collection=col))
+
+                    if qf["server_bays"]:
+                        hdl_d  = 0.004 if qf["bay_3d"] else 0.0025
+                        hdl_cz = bz - bh_dim * 0.40
+                        parts.append(_create_box_object(f"{name}_bay_hdl_{idx:02d}",
+                            cx=bx, cy=-bay_hsg_depth - hdl_d / 2, cz=hdl_cz,
+                            w=bw * 0.62, d=hdl_d, h=h * 0.028, collection=col))
+                        if qf["bezel"]:
+                            parts.append(_create_box_object(f"{name}_bay_hdl_lip_{idx:02d}",
+                                cx=bx, cy=-bay_hsg_depth - hdl_d - 0.0005,
+                                cz=hdl_cz + h * 0.015,
+                                w=bw * 0.64, d=0.001, h=0.001, collection=col))
+
+                    if qf["bezel"]:
+                        # Activity LED — top-left corner of bay face
+                        parts.append(_create_box_object(f"{name}_bay_led_{idx:02d}",
+                            cx=bx - bw * 0.36, cy=-bay_hsg_depth * 0.35,
+                            cz=bz + bh_dim * 0.38,
+                            w=0.003, d=0.002, h=0.003, collection=col))
+
+        # Right control panel zone
+        ctrl_cx = w * 0.385
+        ctrl_hw = w * 0.095
+
+        if qf["bezel"]:
+            parts.append(_create_box_object(f"{name}_ctrl_panel",
+                cx=ctrl_cx, cy=bz_y, cz=h / 2,
+                w=ctrl_hw * 2 - 0.002, d=bz_d, h=h * 0.84, collection=col))
+
+            pwr_z = _jitter(h * 0.74, 0.002, random_variation)
+            parts.append(_create_box_object(f"{name}_pwr",
+                cx=ctrl_cx, cy=-0.003, cz=pwr_z,
+                w=0.008, d=0.003, h=0.008, collection=col))
+
+            parts.append(_create_box_object(f"{name}_uid",
+                cx=ctrl_cx, cy=-0.002, cz=h * 0.57,
+                w=0.005, d=0.002, h=0.005, collection=col))
+
+            for li, lz_frac in enumerate((0.44, 0.37, 0.30)):
+                lz = _jitter(h * lz_frac, 0.001, random_variation)
+                parts.append(_create_box_object(f"{name}_sled_{li}",
+                    cx=ctrl_cx - ctrl_hw * 0.55, cy=-0.003, cz=lz,
+                    w=0.003, d=0.002, h=0.003, collection=col))
+
+            for ui, uz_frac in enumerate((0.20, 0.11)):
+                parts.append(_create_box_object(f"{name}_usb_{ui}",
+                    cx=ctrl_cx, cy=-0.002, cz=h * uz_frac,
+                    w=0.009, d=0.002, h=0.005, collection=col))
+
+            # Service tag pull-tab (far left)
+            parts.append(_create_box_object(f"{name}_svc_tag",
+                cx=-(w * 0.5) + 0.008, cy=-0.001, cz=h / 2,
+                w=0.012, d=0.001, h=h * 0.38, collection=col))
+
+        # ── 1U rear face: dual PSUs, PCIe brackets, I/O cluster ──────────
+        if qf["bezel"]:
+            psu_w = w * 0.175
+
+            for pi, psu_cx in enumerate((
+                -(w / 2) + psu_w * 0.5 + 0.005,
+                -(w / 2) + psu_w * 1.5 + 0.010,
+            )):
+                parts.append(_create_box_object(f"{name}_psu_{pi}_face",
+                    cx=psu_cx, cy=d + 0.001, cz=h / 2,
+                    w=psu_w - 0.003, d=0.002, h=h * 0.90, collection=col))
+                parts.append(_create_box_object(f"{name}_psu_{pi}_c14",
+                    cx=psu_cx, cy=d + 0.004, cz=h * 0.32,
+                    w=0.022, d=0.003, h=0.014, collection=col))
+                parts.append(_create_box_object(f"{name}_psu_{pi}_hdl",
+                    cx=psu_cx, cy=d + 0.005, cz=h * 0.88,
+                    w=psu_w - 0.008, d=0.004, h=h * 0.07, collection=col))
+                if qf["bay_3d"]:
+                    for vi in range(3):
+                        vz = h * 0.52 + vi * h * 0.09
+                        parts.append(_create_box_object(f"{name}_psu_{pi}_vent_{vi}",
+                            cx=psu_cx, cy=d + 0.003, cz=vz,
+                            w=psu_w * 0.78, d=0.0015, h=0.003, collection=col))
+                parts.append(_create_box_object(f"{name}_psu_{pi}_led",
+                    cx=psu_cx + psu_w * 0.32, cy=d + 0.004, cz=h * 0.82,
+                    w=0.004, d=0.003, h=0.004, collection=col))
+
+            pcie_x0      = -(w / 2) + w * 0.38
+            pcie_slot_w  = w * 0.14
+            for si in range(2):
+                sx = pcie_x0 + (si + 0.5) * pcie_slot_w + si * 0.003
+                parts.append(_create_box_object(f"{name}_pcie_{si}_brk",
+                    cx=sx, cy=d + 0.001, cz=h / 2,
+                    w=pcie_slot_w - 0.003, d=0.002, h=h * 0.88, collection=col))
+                if qf["bay_3d"]:
+                    for vi in range(4):
+                        vz = h * 0.12 + vi * h * 0.19
+                        parts.append(_create_box_object(f"{name}_pcie_{si}_vent_{vi}",
+                            cx=sx, cy=d + 0.002, cz=vz,
+                            w=pcie_slot_w * 0.72, d=0.0015, h=0.003, collection=col))
+
+            io_cx = w * 0.30
+            for li in range(2):
+                lx = _jitter(io_cx + (li - 0.5) * 0.018, 0.001, random_variation)
+                parts.append(_create_box_object(f"{name}_rear_lan_{li}",
+                    cx=lx, cy=d + 0.004, cz=h * 0.65,
+                    w=0.014, d=0.004, h=0.010, collection=col))
+            for ui in range(2):
+                parts.append(_create_box_object(f"{name}_rear_usb_{ui}",
+                    cx=io_cx, cy=d + 0.003, cz=h * (0.44 - ui * 0.16),
+                    w=0.009, d=0.003, h=0.005, collection=col))
+            parts.append(_create_box_object(f"{name}_rear_vga",
+                cx=io_cx + 0.020, cy=d + 0.003, cz=h * 0.54,
+                w=0.018, d=0.003, h=0.010, collection=col))
+            parts.append(_create_box_object(f"{name}_rear_mgmt",
+                cx=io_cx - 0.020, cy=d + 0.003, cz=h * 0.36,
+                w=0.010, d=0.003, h=0.007, collection=col))
+
+    else:
+        # ── 2U / 4U front face: existing single-column bay layout ─────────
+        if qf["bezel"]:
+            bz_y = -st / 2
+            bz_d = st
+            parts.append(_create_box_object(f"{name}_bz_top",
+                cx=0.0, cy=bz_y, cz=h - h * 0.08,
+                w=w - 0.006, d=bz_d, h=h * 0.12, collection=col))
+            parts.append(_create_box_object(f"{name}_bz_bot",
+                cx=0.0, cy=bz_y, cz=h * 0.08,
+                w=w - 0.006, d=bz_d, h=h * 0.12, collection=col))
+            parts.append(_create_box_object(f"{name}_bz_right",
+                cx=w * 0.39, cy=bz_y, cz=h / 2,
+                w=w * 0.14, d=bz_d, h=h - 0.004, collection=col))
+
+        if qf["server_bays"]:
+            actual_bays = drive_bays
+            if random_variation and drive_bays > 1:
+                actual_bays = max(1, drive_bays + _random.randint(-1, 1))
+
+            bay_area_w    = w * 0.58
+            bay_x0        = -(w * 0.5) + bay_area_w / 2 + 0.015
+            bay_hsg_depth = 0.010 if qf["bay_3d"] else 0.006
+
+            for i in range(actual_bays):
+                bx = bay_x0 - bay_area_w / 2 + (bay_area_w / actual_bays) * (i + 0.5)
+                bx = _jitter(bx, 0.001, random_variation)
+                bay_w_single = (bay_area_w / actual_bays) - 0.002
+                bay_h_dim    = h * 0.62
+                bay_cz       = h / 2
+
+                parts.append(_create_box_object(f"{name}_bay_hsg_{i:02d}",
+                    cx=bx, cy=-bay_hsg_depth / 2, cz=bay_cz,
+                    w=bay_w_single, d=bay_hsg_depth, h=bay_h_dim, collection=col))
+                parts.append(_create_box_object(f"{name}_bay_tray_{i:02d}",
+                    cx=bx, cy=-bay_hsg_depth * 0.375, cz=bay_cz,
+                    w=bay_w_single * 0.84, d=bay_hsg_depth * 0.5, h=bay_h_dim * 0.80,
+                    collection=col))
+
+                if qf["server_bays"]:
+                    hdl_d   = 0.005 if qf["bay_3d"] else 0.003
+                    bay_hdl = _create_box_object(f"{name}_bay_hdl_{i:02d}",
+                        cx=bx, cy=-bay_hsg_depth - hdl_d / 2,
+                        cz=bay_cz - bay_h_dim * 0.40,
+                        w=bay_w_single * 0.56, d=hdl_d, h=h * 0.052,
+                        collection=col)
+                    parts.append(bay_hdl)
+                    if qf["bezel"]:
+                        hdl_top_z = bay_cz - bay_h_dim * 0.40 + h * 0.026
+                        parts.append(_create_box_object(f"{name}_bay_hdl_lip_{i:02d}",
+                            cx=bx, cy=-bay_hsg_depth - hdl_d - 0.0006,
+                            cz=hdl_top_z,
+                            w=bay_w_single * 0.58, d=0.0015, h=0.0015,
+                            collection=col))
+
                 if qf["bezel"]:
-                    hdl_top_z = bay_cz - bay_h_dim * 0.40 + h * 0.026
-                    parts.append(_create_box_object(
-                        f"{name}_bay_hdl_lip_{i:02d}",
-                        cx=bx, cy=-bay_hsg_depth - hdl_d - 0.0006,
-                        cz=hdl_top_z,
-                        w=bay_w_single * 0.58, d=0.0015, h=0.0015,
-                        collection=col,
-                    ))
+                    parts.append(_create_box_object(f"{name}_bay_led_{i:02d}",
+                        cx=bx, cy=-bay_hsg_depth * 0.5, cz=bay_cz + bay_h_dim * 0.47,
+                        w=0.004, d=0.002, h=0.004, collection=col))
 
-            if qf["bezel"]:
-                # Per-bay activity LED above each bay housing
-                parts.append(_create_box_object(
-                    f"{name}_bay_led_{i:02d}",
-                    cx=bx, cy=-bay_hsg_depth * 0.5, cz=bay_cz + bay_h_dim * 0.47,
-                    w=0.004, d=0.002, h=0.004,
-                    collection=col,
-                ))
-
-    if qf["bezel"]:
-        # ── Top cable management bar + return channel ─────────────────────
-        # Horizontal cross-bar sits proud of face; return flange creates channel
-        parts.append(_create_box_object(
-            f"{name}_cable_bar",
-            cx=0.0, cy=-0.003, cz=h - 0.0045,
-            w=w - 0.008, d=0.007, h=0.005,
-            collection=col,
-        ))
-        parts.append(_create_box_object(
-            f"{name}_cable_return",
-            cx=0.0, cy=-0.007, cz=h - 0.0015,
-            w=w * 0.55, d=0.003, h=0.002,
-            collection=col,
-        ))
+        if qf["bezel"]:
+            parts.append(_create_box_object(f"{name}_cable_bar",
+                cx=0.0, cy=-0.003, cz=h - 0.0045,
+                w=w - 0.008, d=0.007, h=0.005, collection=col))
+            parts.append(_create_box_object(f"{name}_cable_return",
+                cx=0.0, cy=-0.007, cz=h - 0.0015,
+                w=w * 0.55, d=0.003, h=0.002, collection=col))
 
     # ── Mounting ears — always present at all quality levels ───────────────
     # Total panel = 482.6 mm; body = 446 mm; each ear = (482.6 - 446) / 2 = 18.3 mm
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2   # 18.3 mm
-    ear_d = 0.007   # 7 mm deep
+    ear_d = 0.002   # 2 mm deep
     ear_h = h * 0.68
 
     for side_sign in (-1, 1):
@@ -372,8 +495,8 @@ def create_server_chassis(
                 )
                 parts.append(vent)
 
-    if qf["bezel"]:
-        # ── Status LED (proud of right panel) ─────────────────────────────
+    if u_size > 1 and qf["bezel"]:
+        # ── Status LED + power button (2U/4U only — 1U has ctrl panel) ───
         led_x = _jitter(w * 0.41, 0.003, random_variation)
         led_z = _jitter(h * 0.65, 0.005, random_variation)
         led = _create_box_object(
@@ -384,7 +507,6 @@ def create_server_chassis(
         )
         parts.append(led)
 
-        # ── Power button (proud of right panel) ───────────────────────────
         btn_z = _jitter(h * 0.35, 0.004, random_variation)
         btn = _create_box_object(
             f"{name}_pwr",
@@ -394,9 +516,9 @@ def create_server_chassis(
         )
         parts.append(btn)
 
-    if qf["grille"]:
-        # ── Rear exhaust grille (raised tile grid on rear face) ────────────
-        grille_rows = 3 if u_size == 1 else 4
+    if u_size > 1 and qf["grille"]:
+        # ── Rear exhaust grille (2U/4U only — 1U has rear panel above) ───
+        grille_rows = 4
         grille_cols = 8
         grille_w    = w * 0.52
         grille_h    = h * 0.52
@@ -653,7 +775,7 @@ def create_network_switch(
 
     # ── Mounting ears — always present ────────────────────────────────────
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
-    ear_d = 0.007
+    ear_d = 0.002
     ear_h = h * 0.68
     for side_sign in (-1, 1):
         side_label = 'L' if side_sign < 0 else 'R'
@@ -897,7 +1019,7 @@ def create_patch_panel(
 
     # ── Mounting ears — always present ────────────────────────────────────
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
-    ear_d = 0.007
+    ear_d = 0.002
     ear_h = h * 0.70
     for side_sign in (-1, 1):
         side_label = 'L' if side_sign < 0 else 'R'
