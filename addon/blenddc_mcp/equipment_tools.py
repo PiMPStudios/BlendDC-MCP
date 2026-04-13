@@ -233,8 +233,8 @@ def create_server_chassis(
 
         bay_area_w = w * 0.58
         bay_x0     = -(w * 0.5) + bay_area_w / 2 - 0.01
-        # ultra: 10 mm deep 3D housing; high/medium: 5 mm flat surround
-        bay_hsg_depth = 0.010 if qf["bay_3d"] else 0.005
+        # ultra: 10 mm deep 3D housing; high/medium: 6 mm flat surround
+        bay_hsg_depth = 0.010 if qf["bay_3d"] else 0.006
 
         for i in range(actual_bays):
             bx = bay_x0 - bay_area_w / 2 + (bay_area_w / actual_bays) * (i + 0.5)
@@ -263,15 +263,26 @@ def create_server_chassis(
 
             if qf["server_bays"]:
                 # Eject handle: prominent on ultra, visible tab on high/medium
-                hdl_d = 0.004 if qf["bay_3d"] else 0.0025
+                hdl_d = 0.005 if qf["bay_3d"] else 0.003
                 bay_hdl = _create_box_object(
                     f"{name}_bay_hdl_{i:02d}",
                     cx=bx, cy=-bay_hsg_depth - hdl_d / 2,
                     cz=bay_cz - bay_h_dim * 0.40,
-                    w=bay_w_single * 0.50, d=hdl_d, h=h * 0.050,
+                    w=bay_w_single * 0.56, d=hdl_d, h=h * 0.052,
                     collection=col,
                 )
                 parts.append(bay_hdl)
+                # Shadow-edge lip: thin overhang at handle top casts a crisp
+                # shadow line on the handle face under directional light
+                if qf["bezel"]:
+                    hdl_top_z = bay_cz - bay_h_dim * 0.40 + h * 0.026
+                    parts.append(_create_box_object(
+                        f"{name}_bay_hdl_lip_{i:02d}",
+                        cx=bx, cy=-bay_hsg_depth - hdl_d - 0.0006,
+                        cz=hdl_top_z,
+                        w=bay_w_single * 0.58, d=0.0015, h=0.0015,
+                        collection=col,
+                    ))
 
             if qf["bezel"]:
                 # Per-bay activity LED above each bay housing
@@ -429,11 +440,19 @@ def create_server_chassis(
             _var_bsdf.inputs["Metallic"].default_value = max(0.50, min(0.85,
                 0.70 + _random.uniform(-0.10, 0.08)))
         else:
-            _var_bsdf.inputs["Base Color"].default_value = (0.07, 0.07, 0.08, 1.0)
-            _var_bsdf.inputs["Roughness"].default_value = max(0.38, min(0.62,
-                0.50 + _random.uniform(-0.06, 0.06)))
-            _var_bsdf.inputs["Metallic"].default_value = max(0.60, min(0.80,
-                0.70 + _random.uniform(-0.05, 0.05)))
+            # Light wear/dirt: tiny darkening bias + dust-roughness upshift
+            _dirt = _random.uniform(0.0, 0.020)
+            _var_bsdf.inputs["Base Color"].default_value = (
+                max(0.03, 0.070 - _dirt),
+                max(0.03, 0.070 - _dirt),
+                max(0.03, 0.080 - _dirt * 0.6),
+                1.0,
+            )
+            _var_bsdf.inputs["Roughness"].default_value = max(0.42, min(0.68,
+                0.53 + _random.uniform(-0.05, 0.07)))   # dust bias: mean +0.03
+            _var_bsdf.inputs["Metallic"].default_value = max(0.58, min(0.78,
+                0.68 + _random.uniform(-0.05, 0.05))
+            )
     # Replace slot 0 so all faces (currently on the default slot) pick it up
     if joined.data.materials:
         joined.data.materials[0] = _var_mat
@@ -616,6 +635,22 @@ def create_network_switch(
             cz=_jitter(h * 0.15, 0.003, rv),
             w=0.006, d=0.003, h=0.006, collection=col))
 
+        # ── Right-panel management zone texture ───────────────────────────
+        # Horizontal divider splits the right bezel into upper status / lower port
+        mgmt_cx = w * 0.40
+        mgmt_hw = w * 0.065   # half-width of the right panel
+        parts.append(_create_box_object(f"{name}_mgmt_div",
+            cx=mgmt_cx, cy=bz_y - 0.0005, cz=h * 0.50,
+            w=mgmt_hw * 2, d=bz_d + 0.001, h=0.0012, collection=col))
+        # Small status display rectangle (set slightly behind face — recessed look)
+        parts.append(_create_box_object(f"{name}_mgmt_disp",
+            cx=mgmt_cx, cy=0.0004, cz=h * 0.70,
+            w=mgmt_hw * 1.6, d=0.001, h=h * 0.16, collection=col))
+        # USB-A console port indicator
+        parts.append(_create_box_object(f"{name}_mgmt_usb",
+            cx=mgmt_cx, cy=-0.002, cz=h * 0.38,
+            w=0.009, d=0.003, h=0.006, collection=col))
+
     # ── Mounting ears — always present ────────────────────────────────────
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
     ear_d = 0.007
@@ -688,11 +723,18 @@ def create_network_switch(
             _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
                 0.65 + _random.uniform(-0.10, 0.08)))
         else:
-            _var_bsdf.inputs["Base Color"].default_value = (0.05, 0.05, 0.055, 1.0)
-            _var_bsdf.inputs["Roughness"].default_value = max(0.28, min(0.55,
-                0.40 + _random.uniform(-0.06, 0.06)))
-            _var_bsdf.inputs["Metallic"].default_value = max(0.55, min(0.80,
-                0.65 + _random.uniform(-0.05, 0.05)))
+            _dirt = _random.uniform(0.0, 0.018)
+            _var_bsdf.inputs["Base Color"].default_value = (
+                max(0.02, 0.050 - _dirt),
+                max(0.02, 0.050 - _dirt),
+                max(0.02, 0.055 - _dirt * 0.5),
+                1.0,
+            )
+            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.55,
+                0.42 + _random.uniform(-0.05, 0.07)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.53, min(0.78,
+                0.63 + _random.uniform(-0.05, 0.05))
+            )
     if joined.data.materials:
         joined.data.materials[0] = _var_mat
     else:
@@ -891,11 +933,18 @@ def create_patch_panel(
             _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
                 0.60 + _random.uniform(-0.10, 0.10)))
         else:
-            _var_bsdf.inputs["Base Color"].default_value = (0.68, 0.68, 0.70, 1.0)
-            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.55,
-                0.40 + _random.uniform(-0.05, 0.05)))
-            _var_bsdf.inputs["Metallic"].default_value = max(0.50, min(0.75,
-                0.60 + _random.uniform(-0.05, 0.05)))
+            _dirt = _random.uniform(0.0, 0.030)   # panels show more age
+            _var_bsdf.inputs["Base Color"].default_value = (
+                max(0.45, 0.680 - _dirt),
+                max(0.45, 0.680 - _dirt),
+                max(0.45, 0.700 - _dirt * 0.7),
+                1.0,
+            )
+            _var_bsdf.inputs["Roughness"].default_value = max(0.32, min(0.58,
+                0.42 + _random.uniform(-0.05, 0.07)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.48, min(0.73,
+                0.58 + _random.uniform(-0.05, 0.05))
+            )
         if joined.data.materials:
             joined.data.materials[0] = _var_mat
         else:
