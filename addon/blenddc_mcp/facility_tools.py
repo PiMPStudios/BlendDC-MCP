@@ -322,7 +322,8 @@ def create_raised_floor(
     # Keys: x_lo, x_hi, y_lo, y_hi (metres), facing ("+Y" or "-Y").
     #   facing="+Y" → row's front face is at y_hi (opens toward +Y / north)
     #   facing="-Y" → row's front face is at y_lo (opens toward -Y / south)
-    # Cold aisle = two adjacent rows whose FRONTS face each other.
+    # Cold aisle = two adjacent rows whose FRONTS face each other across
+    # exactly cold_aisle_depth_mm of open floor space.
     # When omitted the auto-layout params below are used instead.
     rack_rows: Optional[List[Dict]] = None,
     # ── Auto-layout params (ignored when rack_rows is provided) ───────────
@@ -330,83 +331,110 @@ def create_raised_floor(
     racks_per_row: int = 3,
     rack_width_mm: float = 600.0,
     rack_depth_mm: float = 1000.0,
-    aisle_depth_mm: float = 1200.0,
+    # Cold aisle = front-face to front-face distance (must equal N × tile size
+    # for clean perforated tile coverage; default 1200 mm = 2 × 600 mm tiles).
+    cold_aisle_depth_mm: float = 1200.0,
+    # Hot aisle = back-face to back-face distance between adjacent pairs.
+    hot_aisle_depth_mm: float = 1200.0,
     row_x_start_m: float = 0.0,
+    # Y position of the FIRST FRONT FACE.
+    # Row 0 (facing +Y) has its front face here; it extends rack_depth_mm
+    # in the −Y direction behind this line.
+    # Example: row_y_start_m=0  →  Row 0 occupies Y=[−rack_depth, 0],
+    #          cold aisle Y=[0, cold_aisle_depth], Row 1 Y=[cold_aisle_depth, …]
     row_y_start_m: float = 0.0,
-    # True  → row 0 faces +Y, row 1 faces −Y, row 2 faces +Y … (default)
-    #         First aisle (between rows 0 and 1) is COLD, second is HOT, etc.
-    # False → all rows face −Y (no cold-aisle detection; all tiles solid)
+    # True  → row 0 faces +Y, row 1 faces −Y, … → COLD aisles between pairs,
+    #         HOT aisles between pairs (default).
+    # False → all rows face −Y (single-direction; no cold-aisle detection).
     alternating_facing: bool = True,
     # ── Floor extent ──────────────────────────────────────────────────────
-    # Set to 0 to auto-compute as rack footprint + margin on all sides.
     floor_width_m: float = 0.0,
     floor_depth_m: float = 0.0,
     margin_mm: float = 600.0,
 ) -> Dict[str, Any]:
     """
-    Generate a single-mesh raised floor system with automatic cold-aisle
-    perforated tile placement.
+    Generate a single-mesh raised floor with automatic cold/hot aisle tile
+    assignment.
 
-    Cold aisles (fronts facing fronts) receive Tate PERF 1250-style waffle
-    grating tiles (15 mm bars / 15 mm gaps, ~25 % open area).  All other
-    zones — under-rack footprints, hot aisles, corridors, margins — use
-    solid tiles.
+    COLD AISLE STANDARD
+    ───────────────────
+    Cold aisle width = exactly cold_aisle_depth_mm (default 1200 mm) measured
+    front-face to front-face.  With 600 mm tiles this gives exactly two
+    perforated tile rows spanning the full aisle opening.
 
-    The entire floor (pedestals + stringers + all tiles) is merged into ONE
-    mesh object for maximum render performance.
+      Row A  (facing +Y, front at Y=F)
+      Cold aisle  [F, F + cold_aisle_depth_mm]   ← perforated tiles
+      Row B  (facing -Y, front at Y=F + cold_aisle_depth_mm)
+
+    Tile assignment (center-based):
+      • Tile center inside a rack footprint        → SOLID
+      • Tile center inside a cold-aisle zone       → PERFORATED
+      • Everything else (hot aisle, margins, etc.) → SOLID
 
     Row facing convention:
-      facing="+Y"  front of the rack row opens toward +Y (north).
-                   Front face is at the row's y_hi boundary.
-      facing="-Y"  front of the rack row opens toward -Y (south).
-                   Front face is at the row's y_lo boundary.
-                   This matches the default rack_cabinet origin (front at Y=0).
+      facing="+Y"  front face at y_hi, rack body extends toward −Y.
+      facing="-Y"  front face at y_lo, rack body extends toward +Y.
 
-    Cold aisle detection:
-      Two adjacent rows A (lower Y) and B (higher Y) form a COLD aisle when
-      A.facing=="+Y" (A's front at y_hi faces the aisle) AND
-      B.facing=="-Y" (B's front at y_lo faces the aisle).
-      All other aisle combinations are treated as HOT / solid.
+    Auto-layout (rack_rows=None):
+      row_y_start_m is the Y of the first FRONT FACE.  Row 0 (facing +Y)
+      sits behind it at Y = [row_y_start_m − rack_depth, row_y_start_m].
+      Adjacent pairs share a HOT aisle (back-to-back, hot_aisle_depth_mm).
 
-    Pedestal grid is uniform across the entire floor — no suppression under
-    racks — which matches real data-centre practice.
-
-    name:              Blender collection / object name
-    rack_rows:         explicit row layout (see above); auto-generated if None
-    row_count:         number of rack rows (auto-layout only)
-    racks_per_row:     racks per row (auto-layout only)
-    rack_width_mm:     individual rack width in mm (auto-layout only)
-    rack_depth_mm:     rack depth front-to-back in mm (auto-layout only)
-    aisle_depth_mm:    aisle width between rows in mm (auto-layout only)
-    row_x_start_m:     world X of leftmost rack column (auto-layout only)
-    row_y_start_m:     world Y of first row's y_lo boundary (auto-layout only)
-    alternating_facing: True = row 0 faces +Y, row 1 faces −Y, … (auto-layout)
-    floor_width_m:     explicit floor X extent in m; 0 = auto
-    floor_depth_m:     explicit floor Y extent in m; 0 = auto
-    margin_mm:         margin beyond rack footprint when auto-computing extent
+    name:                  Blender collection / object name
+    rack_rows:             explicit layout; auto-generated when None
+    row_count:             rows in auto-layout
+    racks_per_row:         racks per row in auto-layout
+    rack_width_mm:         individual rack width (mm)
+    rack_depth_mm:         rack depth front-to-back (mm)
+    cold_aisle_depth_mm:   front-face to front-face cold aisle width (mm)
+    hot_aisle_depth_mm:    back-face to back-face hot aisle width (mm)
+    row_x_start_m:         world X of leftmost rack column
+    row_y_start_m:         world Y of first row's FRONT FACE
+    alternating_facing:    True = alternating +Y/−Y rows (cold+hot aisles)
+    floor_width_m:         explicit floor X extent (0 = auto)
+    floor_depth_m:         explicit floor Y extent (0 = auto)
+    margin_mm:             margin beyond rack footprint when auto-sizing
     """
-    rack_d_m = rack_depth_mm / 1000.0
-    rack_w_m = rack_width_mm / 1000.0
-    aisle_m  = aisle_depth_mm / 1000.0
-    margin_m = margin_mm / 1000.0
+    rack_d_m      = rack_depth_mm / 1000.0
+    rack_w_m      = rack_width_mm / 1000.0
+    cold_m        = cold_aisle_depth_mm / 1000.0
+    hot_m         = hot_aisle_depth_mm / 1000.0
+    margin_m      = margin_mm / 1000.0
 
     # ── 1. Build rack_rows list if not supplied ────────────────────────────
+    # Layout is built around FRONT FACE positions so cold-aisle boundaries
+    # align with the tile grid (cold_aisle_depth must equal N × RF_GRID_M).
     if rack_rows is None:
         rack_rows = []
-        y = row_y_start_m
         for i in range(row_count):
             if alternating_facing:
-                facing = "+Y" if (i % 2 == 0) else "-Y"
+                pair_idx = i // 2          # which cold-aisle pair this row belongs to
+                is_b     = (i % 2 == 1)    # B-row of the pair (facing -Y)
+                # A-row front face Y within this pair
+                a_front = (row_y_start_m
+                           + pair_idx * (cold_m + hot_m + 2 * rack_d_m))
+                if not is_b:               # A-row: facing +Y, front at y_hi
+                    facing = "+Y"
+                    y_hi   = a_front
+                    y_lo   = a_front - rack_d_m
+                else:                      # B-row: facing -Y, front at y_lo
+                    facing = "-Y"
+                    y_lo   = a_front + cold_m
+                    y_hi   = y_lo + rack_d_m
             else:
+                # All rows face -Y; simple sequential layout
+                front = row_y_start_m + i * (rack_d_m + cold_m)
                 facing = "-Y"
+                y_lo   = front
+                y_hi   = front + rack_d_m
+
             rack_rows.append({
                 "x_lo":   row_x_start_m,
                 "x_hi":   row_x_start_m + racks_per_row * rack_w_m,
-                "y_lo":   y,
-                "y_hi":   y + rack_d_m,
+                "y_lo":   round(y_lo, 6),
+                "y_hi":   round(y_hi, 6),
                 "facing": facing,
             })
-            y += rack_d_m + aisle_m
 
     # ── 2. Floor extent ────────────────────────────────────────────────────
     all_x = [r["x_lo"] for r in rack_rows] + [r["x_hi"] for r in rack_rows]
@@ -416,7 +444,6 @@ def create_raised_floor(
     if floor_depth_m <= 0:
         floor_depth_m = (max(all_y) - min(all_y)) + 2 * margin_m
     fx0 = min(all_x) - margin_m
-    fy0 = min(all_y) - margin_m
 
     # ── 3. Detect cold aisle zones ─────────────────────────────────────────
     # Sort rows by lower Y boundary; check each adjacent pair.
@@ -433,6 +460,22 @@ def create_raised_floor(
         if ra["facing"] == "+Y" and rb["facing"] == "-Y":
             cold_zones.append((az0, az1))
 
+    # ── 3b. Snap fy0 so tile boundaries align with the first cold aisle ────
+    # Without snapping the grid origin, perforated tiles can bleed under rack
+    # fronts (e.g. a tile spanning [0.8, 1.4] when the rack front is at 1.2).
+    # We snap fy0 downward to the nearest multiple of RF_GRID_M below
+    # fy0_raw, ensuring (first_cold_lo − fy0) is an exact multiple of RF_GRID_M.
+    # Since cold_aisle_depth == 2 × RF_GRID_M, this automatically aligns the
+    # far edge too — tiles fit [cold_lo, cold_lo + 1200 mm] with zero overflow.
+    fy0_raw = min(all_y) - margin_m
+    if cold_zones:
+        first_cold_lo = cold_zones[0][0]
+        # How many full tile steps fit between fy0_raw and first_cold_lo?
+        steps = math.ceil((first_cold_lo - fy0_raw) / RF_GRID_M)
+        fy0 = first_cold_lo - steps * RF_GRID_M
+    else:
+        fy0 = fy0_raw
+
     # ── 4. Tile grid ───────────────────────────────────────────────────────
     nx = max(1, math.ceil(floor_width_m / RF_GRID_M))
     ny = max(1, math.ceil(floor_depth_m / RF_GRID_M))
@@ -442,13 +485,15 @@ def create_raised_floor(
     tile_cz  = RF_PEDESTAL_TOTAL_H_M - RF_TILE_H_M / 2
 
     def _tile_type(ix: int, iy: int) -> str:
+        # Use tile center for both checks.
+        # Rack check: center-based prevents tiles whose center is under the rack body
+        # from being perforated. The ~200 mm overlap at the rack front face is hidden
+        # under the rack enclosure from any normal viewing angle.
         tcx = fx0 + (ix + 0.5) * RF_GRID_M
         tcy = fy0 + (iy + 0.5) * RF_GRID_M
-        # Solid under any rack footprint
         for row in rack_rows:
             if row["x_lo"] <= tcx <= row["x_hi"] and row["y_lo"] <= tcy <= row["y_hi"]:
                 return "solid"
-        # Perforated in cold aisles
         for (cz0, cz1) in cold_zones:
             if cz0 <= tcy <= cz1:
                 return "perforated"
@@ -530,6 +575,40 @@ def create_raised_floor(
     obj["rf_cold_zones"]     = str(cold_zones)
     obj["rf_finished_floor"] = round(RF_PEDESTAL_TOTAL_H_M, 4)
 
+    # ── 7. Build rack placement data ──────────────────────────────────────
+    # For each row, emit one slot entry per rack column so callers can drive
+    # create_rack_cabinet without manually duplicating floor coordinates.
+    # Each slot:  x (rack center X), y (rack front face Y), rot_z_deg, row_index, slot_index
+    rack_placement: List[Dict] = []
+    for ri, row in enumerate(rack_rows):
+        row_w = row["x_hi"] - row["x_lo"]
+        rw_m  = row_w / max(1, round(row_w / rack_w_m))   # infer per-rack width from row span
+        n_slots = max(1, round(row_w / rw_m))
+        # rack origin (create_rack_cabinet default): front face at Y=0, back at Y=+depth
+        # facing "+Y" → front at y_hi → rack placed with front at y_hi, rotated 180°
+        # facing "-Y" → front at y_lo → rack placed normally, no rotation
+        if row["facing"] == "+Y":
+            front_y   = row["y_hi"]
+            rack_y    = front_y          # rack Y origin = front face
+            rot_z_deg = 180.0
+        else:
+            front_y   = row["y_lo"]
+            rack_y    = front_y
+            rot_z_deg = 0.0
+        for si in range(n_slots):
+            # Rack origin is at the X center of the cabinet (geometry spans ±width/2).
+            # Use slot center for both 0° and 180° — rotation doesn't shift the center.
+            slot_cx = row["x_lo"] + (si + 0.5) * rw_m
+            rack_placement.append({
+                "row":       ri,
+                "slot":      si,
+                "x":         round(slot_cx, 4),
+                "y":         round(rack_y, 4),
+                "z":         round(RF_PEDESTAL_TOTAL_H_M, 4),
+                "rot_z_deg": rot_z_deg,
+                "facing":    row["facing"],
+            })
+
     return {
         "object":           name,
         "collection":       name,
@@ -539,6 +618,7 @@ def create_raised_floor(
                              "y1": round(fy0 + floor_depth_m, 4)},
         "cold_aisle_zones": cold_zones,
         "finished_floor_z_m": RF_PEDESTAL_TOTAL_H_M,
+        "rack_placement":   rack_placement,
         "warnings":         [],
     }
 
