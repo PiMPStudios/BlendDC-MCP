@@ -313,6 +313,236 @@ def _create_raised_floor(
                 tiles_col.objects.link(tile_obj)
 
 
+@mcp.tool()
+@thread_safe
+def create_raised_floor(
+    name: str = "RaisedFloor",
+    # ── Explicit rack row layout ───────────────────────────────────────────
+    # List of dicts, each describing one rack row's footprint and facing.
+    # Keys: x_lo, x_hi, y_lo, y_hi (metres), facing ("+Y" or "-Y").
+    #   facing="+Y" → row's front face is at y_hi (opens toward +Y / north)
+    #   facing="-Y" → row's front face is at y_lo (opens toward -Y / south)
+    # Cold aisle = two adjacent rows whose FRONTS face each other.
+    # When omitted the auto-layout params below are used instead.
+    rack_rows: Optional[List[Dict]] = None,
+    # ── Auto-layout params (ignored when rack_rows is provided) ───────────
+    row_count: int = 3,
+    racks_per_row: int = 3,
+    rack_width_mm: float = 600.0,
+    rack_depth_mm: float = 1000.0,
+    aisle_depth_mm: float = 1200.0,
+    row_x_start_m: float = 0.0,
+    row_y_start_m: float = 0.0,
+    # True  → row 0 faces +Y, row 1 faces −Y, row 2 faces +Y … (default)
+    #         First aisle (between rows 0 and 1) is COLD, second is HOT, etc.
+    # False → all rows face −Y (no cold-aisle detection; all tiles solid)
+    alternating_facing: bool = True,
+    # ── Floor extent ──────────────────────────────────────────────────────
+    # Set to 0 to auto-compute as rack footprint + margin on all sides.
+    floor_width_m: float = 0.0,
+    floor_depth_m: float = 0.0,
+    margin_mm: float = 600.0,
+) -> Dict[str, Any]:
+    """
+    Generate a single-mesh raised floor system with automatic cold-aisle
+    perforated tile placement.
+
+    Cold aisles (fronts facing fronts) receive Tate PERF 1250-style waffle
+    grating tiles (15 mm bars / 15 mm gaps, ~25 % open area).  All other
+    zones — under-rack footprints, hot aisles, corridors, margins — use
+    solid tiles.
+
+    The entire floor (pedestals + stringers + all tiles) is merged into ONE
+    mesh object for maximum render performance.
+
+    Row facing convention:
+      facing="+Y"  front of the rack row opens toward +Y (north).
+                   Front face is at the row's y_hi boundary.
+      facing="-Y"  front of the rack row opens toward -Y (south).
+                   Front face is at the row's y_lo boundary.
+                   This matches the default rack_cabinet origin (front at Y=0).
+
+    Cold aisle detection:
+      Two adjacent rows A (lower Y) and B (higher Y) form a COLD aisle when
+      A.facing=="+Y" (A's front at y_hi faces the aisle) AND
+      B.facing=="-Y" (B's front at y_lo faces the aisle).
+      All other aisle combinations are treated as HOT / solid.
+
+    Pedestal grid is uniform across the entire floor — no suppression under
+    racks — which matches real data-centre practice.
+
+    name:              Blender collection / object name
+    rack_rows:         explicit row layout (see above); auto-generated if None
+    row_count:         number of rack rows (auto-layout only)
+    racks_per_row:     racks per row (auto-layout only)
+    rack_width_mm:     individual rack width in mm (auto-layout only)
+    rack_depth_mm:     rack depth front-to-back in mm (auto-layout only)
+    aisle_depth_mm:    aisle width between rows in mm (auto-layout only)
+    row_x_start_m:     world X of leftmost rack column (auto-layout only)
+    row_y_start_m:     world Y of first row's y_lo boundary (auto-layout only)
+    alternating_facing: True = row 0 faces +Y, row 1 faces −Y, … (auto-layout)
+    floor_width_m:     explicit floor X extent in m; 0 = auto
+    floor_depth_m:     explicit floor Y extent in m; 0 = auto
+    margin_mm:         margin beyond rack footprint when auto-computing extent
+    """
+    rack_d_m = rack_depth_mm / 1000.0
+    rack_w_m = rack_width_mm / 1000.0
+    aisle_m  = aisle_depth_mm / 1000.0
+    margin_m = margin_mm / 1000.0
+
+    # ── 1. Build rack_rows list if not supplied ────────────────────────────
+    if rack_rows is None:
+        rack_rows = []
+        y = row_y_start_m
+        for i in range(row_count):
+            if alternating_facing:
+                facing = "+Y" if (i % 2 == 0) else "-Y"
+            else:
+                facing = "-Y"
+            rack_rows.append({
+                "x_lo":   row_x_start_m,
+                "x_hi":   row_x_start_m + racks_per_row * rack_w_m,
+                "y_lo":   y,
+                "y_hi":   y + rack_d_m,
+                "facing": facing,
+            })
+            y += rack_d_m + aisle_m
+
+    # ── 2. Floor extent ────────────────────────────────────────────────────
+    all_x = [r["x_lo"] for r in rack_rows] + [r["x_hi"] for r in rack_rows]
+    all_y = [r["y_lo"] for r in rack_rows] + [r["y_hi"] for r in rack_rows]
+    if floor_width_m <= 0:
+        floor_width_m = (max(all_x) - min(all_x)) + 2 * margin_m
+    if floor_depth_m <= 0:
+        floor_depth_m = (max(all_y) - min(all_y)) + 2 * margin_m
+    fx0 = min(all_x) - margin_m
+    fy0 = min(all_y) - margin_m
+
+    # ── 3. Detect cold aisle zones ─────────────────────────────────────────
+    # Sort rows by lower Y boundary; check each adjacent pair.
+    sorted_rows = sorted(rack_rows, key=lambda r: r["y_lo"])
+    cold_zones: List[Tuple[float, float]] = []
+    for i in range(len(sorted_rows) - 1):
+        ra = sorted_rows[i]
+        rb = sorted_rows[i + 1]
+        az0 = ra["y_hi"]
+        az1 = rb["y_lo"]
+        if az1 <= az0:
+            continue
+        # COLD: ra opens into the aisle (+Y) AND rb opens into the aisle (-Y)
+        if ra["facing"] == "+Y" and rb["facing"] == "-Y":
+            cold_zones.append((az0, az1))
+
+    # ── 4. Tile grid ───────────────────────────────────────────────────────
+    nx = max(1, math.ceil(floor_width_m / RF_GRID_M))
+    ny = max(1, math.ceil(floor_depth_m / RF_GRID_M))
+
+    tw       = RF_TILE_W_M - RF_TILE_GROUT_M   # 0.596 m
+    td       = RF_TILE_D_M - RF_TILE_GROUT_M   # 0.596 m
+    tile_cz  = RF_PEDESTAL_TOTAL_H_M - RF_TILE_H_M / 2
+
+    def _tile_type(ix: int, iy: int) -> str:
+        tcx = fx0 + (ix + 0.5) * RF_GRID_M
+        tcy = fy0 + (iy + 0.5) * RF_GRID_M
+        # Solid under any rack footprint
+        for row in rack_rows:
+            if row["x_lo"] <= tcx <= row["x_hi"] and row["y_lo"] <= tcy <= row["y_hi"]:
+                return "solid"
+        # Perforated in cold aisles
+        for (cz0, cz1) in cold_zones:
+            if cz0 <= tcy <= cz1:
+                return "perforated"
+        return "solid"
+
+    # ── 5. Build everything into one bmesh ─────────────────────────────────
+    bm = bmesh.new()
+
+    def _box(cx: float, cy: float, cz: float, w: float, d: float, h: float) -> None:
+        mat = (mathutils.Matrix.Translation((cx, cy, cz)) @
+               mathutils.Matrix.Diagonal((w * 0.5, d * 0.5, h * 0.5, 1.0)))
+        bmesh.ops.create_cube(bm, size=2.0, matrix=mat)
+
+    # Pedestals — full uniform grid
+    base_cz  = RF_PEDESTAL_BASE_H_M / 2
+    shaft_cz = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M / 2
+    head_cz  = RF_PEDESTAL_BASE_H_M + RF_PEDESTAL_SHAFT_H_M + RF_PEDESTAL_HEAD_H_M / 2
+
+    for iy in range(ny + 1):
+        for ix in range(nx + 1):
+            px = fx0 + ix * RF_GRID_M
+            py = fy0 + iy * RF_GRID_M
+            _box(px, py, base_cz,  RF_PEDESTAL_BASE_W_M,  RF_PEDESTAL_BASE_W_M,  RF_PEDESTAL_BASE_H_M)
+            _box(px, py, shaft_cz, RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_W_M, RF_PEDESTAL_SHAFT_H_M)
+            _box(px, py, head_cz,  RF_PEDESTAL_HEAD_W_M,  RF_PEDESTAL_HEAD_W_M,  RF_PEDESTAL_HEAD_H_M)
+
+    # Stringers — X-direction spans between pedestal heads
+    span    = RF_GRID_M - RF_PEDESTAL_HEAD_W_M
+    for iy in range(ny + 1):
+        for ix in range(nx):
+            _box(fx0 + (ix + 0.5) * RF_GRID_M, fy0 + iy * RF_GRID_M,
+                 head_cz, span, RF_STRINGER_W_M, RF_STRINGER_H_M)
+
+    # Stringers — Y-direction spans
+    for iy in range(ny):
+        for ix in range(nx + 1):
+            _box(fx0 + ix * RF_GRID_M, fy0 + (iy + 0.5) * RF_GRID_M,
+                 head_cz, RF_STRINGER_W_M, span, RF_STRINGER_H_M)
+
+    # Tiles
+    perf_bar   = 0.015
+    perf_gap   = 0.015
+    perf_pitch = perf_bar + perf_gap
+
+    for iy in range(ny):
+        for ix in range(nx):
+            tcx   = fx0 + (ix + 0.5) * RF_GRID_M
+            tcy   = fy0 + (iy + 0.5) * RF_GRID_M
+            ttype = _tile_type(ix, iy)
+
+            if ttype == "solid":
+                _box(tcx, tcy, tile_cz, tw, td, RF_TILE_H_M)
+            else:
+                # Perforated — Tate PERF 1250 waffle grid
+                n_pb  = int(tw / perf_pitch)
+                p_off = (tw - n_pb * perf_pitch) / 2.0
+                for k in range(n_pb):
+                    # X-running bar (full tile width, stepped in Y)
+                    by = tcy - tw / 2 + p_off + perf_bar / 2 + k * perf_pitch
+                    _box(tcx, by, tile_cz, tw, perf_bar, RF_TILE_H_M)
+                    # Y-running bar (full tile depth, stepped in X)
+                    bx = tcx - td / 2 + p_off + perf_bar / 2 + k * perf_pitch
+                    _box(bx, tcy, tile_cz, perf_bar, td, RF_TILE_H_M)
+
+    # ── 6. Create single mesh object ───────────────────────────────────────
+    col = _get_or_create_collection(name)
+    mesh = bpy.data.meshes.new(name + "_Mesh")
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+
+    obj = bpy.data.objects.new(name, mesh)
+    obj.location = (0.0, 0.0, 0.0)
+    col.objects.link(obj)
+
+    # Metadata
+    obj["rf_nx"]             = nx
+    obj["rf_ny"]             = ny
+    obj["rf_cold_zones"]     = str(cold_zones)
+    obj["rf_finished_floor"] = round(RF_PEDESTAL_TOTAL_H_M, 4)
+
+    return {
+        "object":           name,
+        "collection":       name,
+        "tile_grid":        {"nx": nx, "ny": ny, "total_tiles": nx * ny},
+        "floor_extent_m":   {"x0": round(fx0, 4), "y0": round(fy0, 4),
+                             "x1": round(fx0 + floor_width_m, 4),
+                             "y1": round(fy0 + floor_depth_m, 4)},
+        "cold_aisle_zones": cold_zones,
+        "finished_floor_z_m": RF_PEDESTAL_TOTAL_H_M,
+        "warnings":         [],
+    }
+
+
 def _section_col(section_name: str) -> bpy.types.Collection:
     """Return the facility section collection, raising if not found or wrong type."""
     col = bpy.data.collections.get(section_name)
