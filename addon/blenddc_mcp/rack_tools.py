@@ -1111,8 +1111,21 @@ def snap_to_rack_u(
 
     col    = bpy.data.collections.get(collection_name)
     bh     = col["rack_base_height_m"]
+    u_height     = col.get("rack_u_height", 42)
+    has_fan_tray = col.get("rack_has_fan_tray", False)
+
+    # Equipment origin is at front-face-bottom-centre (Z=0 in local space),
+    # so place it at z_bot — NOT the U-slot centre.
     z_bot  = bh + (u_slot - 1) * RACK_U_M
-    z_ctr  = z_bot + (u_size * RACK_U_M) / 2
+
+    # The fan tray sits at z_base = bh + rh (top of rail zone), which is exactly
+    # where U{u_height} ends — so all u_height slots are fully usable.
+    # Warn only if equipment would exceed the rail zone entirely.
+    warnings = []
+    if (u_slot + u_size - 1) > u_height:
+        warnings.append(
+            f"U{u_slot}+{u_size}U exceeds the rack's {u_height}U rail zone"
+        )
 
     # EAR_SETBACK_M: push the server 2.5 mm deeper than the rail front face so the
     # mounting ear rests ON the flange with a subtle shoulder rather than sitting
@@ -1124,21 +1137,24 @@ def snap_to_rack_u(
     # This handles racks at any world position or Z rotation (e.g. 180° Row B).
     rack_body = bpy.data.objects.get(f"{collection_name}_Body")
     if rack_body:
-        local_pos = mathutils.Vector((x_offset, mount_y, z_ctr))
+        local_pos = mathutils.Vector((x_offset, mount_y, z_bot))
         obj.location = rack_body.matrix_world @ local_pos
         obj.rotation_euler.z = rack_body.rotation_euler.z
     else:
         obj.location.x = x_offset
         obj.location.y = mount_y
-        obj.location.z = z_ctr
+        obj.location.z = z_bot
 
-    return {
-        "object":      object_name,
-        "collection":  collection_name,
-        "u_slot":      u_slot,
-        "u_size":      u_size,
+    result = {
+        "object":       object_name,
+        "collection":   collection_name,
+        "u_slot":       u_slot,
+        "u_size":       u_size,
         "new_location": list(obj.location),
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 # ── Tool 6: get_rack_rail_positions ───────────────────────────────────────
