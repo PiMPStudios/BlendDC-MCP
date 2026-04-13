@@ -233,8 +233,8 @@ def create_server_chassis(
 
         bay_area_w = w * 0.58
         bay_x0     = -(w * 0.5) + bay_area_w / 2 - 0.01
-        # ultra: 8 mm deep 3D housing; high/medium: 4 mm flat surround
-        bay_hsg_depth = 0.008 if qf["bay_3d"] else 0.004
+        # ultra: 10 mm deep 3D housing; high/medium: 5 mm flat surround
+        bay_hsg_depth = 0.010 if qf["bay_3d"] else 0.005
 
         for i in range(actual_bays):
             bx = bay_x0 - bay_area_w / 2 + (bay_area_w / actual_bays) * (i + 0.5)
@@ -261,25 +261,42 @@ def create_server_chassis(
             )
             parts.append(bay_tray)
 
-            if qf["bay_3d"]:
-                # ultra only: eject handle tab at bottom of bay housing
+            if qf["server_bays"]:
+                # Eject handle: prominent on ultra, subtle tab on high/medium
+                hdl_d = 0.003 if qf["bay_3d"] else 0.0015
                 bay_hdl = _create_box_object(
                     f"{name}_bay_hdl_{i:02d}",
-                    cx=bx, cy=-bay_hsg_depth - 0.001, cz=bay_cz - bay_h_dim * 0.40,
-                    w=bay_w_single * 0.50, d=0.003, h=h * 0.050,
+                    cx=bx, cy=-bay_hsg_depth - hdl_d / 2,
+                    cz=bay_cz - bay_h_dim * 0.40,
+                    w=bay_w_single * 0.50, d=hdl_d, h=h * 0.050,
                     collection=col,
                 )
                 parts.append(bay_hdl)
 
+            if qf["bezel"]:
+                # Per-bay activity LED above each bay housing
+                parts.append(_create_box_object(
+                    f"{name}_bay_led_{i:02d}",
+                    cx=bx, cy=-bay_hsg_depth * 0.5, cz=bay_cz + bay_h_dim * 0.47,
+                    w=0.004, d=0.002, h=0.004,
+                    collection=col,
+                ))
+
     if qf["bezel"]:
-        # ── Top cable management lip ──────────────────────────────────────
-        cable_lip = _create_box_object(
-            f"{name}_cable_lip",
-            cx=0.0, cy=-0.002, cz=h - 0.003,
-            w=w - 0.008, d=0.005, h=0.004,
+        # ── Top cable management bar + return channel ─────────────────────
+        # Horizontal cross-bar sits proud of face; return flange creates channel
+        parts.append(_create_box_object(
+            f"{name}_cable_bar",
+            cx=0.0, cy=-0.003, cz=h - 0.0045,
+            w=w - 0.008, d=0.007, h=0.005,
             collection=col,
-        )
-        parts.append(cable_lip)
+        ))
+        parts.append(_create_box_object(
+            f"{name}_cable_return",
+            cx=0.0, cy=-0.007, cz=h - 0.0015,
+            w=w * 0.55, d=0.003, h=0.002,
+            collection=col,
+        ))
 
     # ── Mounting ears — always present at all quality levels ───────────────
     # Total panel = 482.6 mm; body = 446 mm; each ear = (482.6 - 446) / 2 = 18.3 mm
@@ -541,16 +558,15 @@ def create_network_switch(
                 cx=sep_x, cy=-0.0015, cz=h * 0.50,
                 w=0.002, d=0.004, h=h * 0.72, collection=col))
 
-        # ── Status LED strip ──────────────────────────────────────────────
-        led_count  = min(ports_per_row, 12)
-        led_area_w = port_area_w * 0.95
-        led_step   = led_area_w / led_count
-        led_row_z  = port_cz_base + rows * (port_h + 0.002) + h * 0.04
-        for i in range(led_count):
-            lx = _jitter(-(led_area_w / 2) + i * led_step + led_step / 2, 0.001, rv)
-            lz = _jitter(led_row_z, 0.001, rv)
-            parts.append(_create_box_object(f"{name}_led_{i:02d}",
-                cx=lx, cy=-0.003, cz=lz, w=0.005, d=0.003, h=0.004, collection=col))
+        # ── Per-port status LEDs (one LED per port above each tile) ───────
+        led_row_z = port_cz_base + rows * (port_h + 0.002) + h * 0.035
+        for p in range(ports_per_row):
+            lx = _jitter(-(port_area_w / 2) + p * port_w + port_w / 2, 0.0002, rv)
+            lz = _jitter(led_row_z, 0.0003, rv)
+            parts.append(_create_box_object(f"{name}_led_{p:02d}",
+                cx=lx, cy=-0.0025, cz=lz,
+                w=port_w * 0.45, d=0.0025, h=h * 0.05,
+                collection=col))
 
         # ── SFP uplink ports ──────────────────────────────────────────────
         sfp_base_x = w * 0.38
@@ -561,6 +577,21 @@ def create_network_switch(
             parts.append(_create_box_object(f"{name}_sfp_{i}",
                 cx=sx, cy=-0.002, cz=h * 0.60,
                 w=sfp_w_dim, d=0.005, h=sfp_h_dim, collection=col))
+
+        # ── SFP cage surround (raised frame around the 4-port cluster) ────
+        sfp_ctr_x  = sfp_base_x - 1.5 * (sfp_w_dim + 0.003)
+        sfp_span   = 4 * sfp_w_dim + 3 * 0.003
+        sfp_margin = 0.003
+        # Top rail
+        parts.append(_create_box_object(f"{name}_sfp_top",
+            cx=sfp_ctr_x, cy=-0.001,
+            cz=h * 0.60 + sfp_h_dim / 2 + sfp_margin / 2,
+            w=sfp_span + sfp_margin * 2, d=0.002, h=sfp_margin, collection=col))
+        # Bottom rail
+        parts.append(_create_box_object(f"{name}_sfp_bot",
+            cx=sfp_ctr_x, cy=-0.001,
+            cz=h * 0.60 - sfp_h_dim / 2 - sfp_margin / 2,
+            w=sfp_span + sfp_margin * 2, d=0.002, h=sfp_margin, collection=col))
 
         # ── Management port + power LED ───────────────────────────────────
         parts.append(_create_box_object(f"{name}_mgmt",
@@ -735,6 +766,10 @@ def create_patch_panel(
         parts.append(_create_box_object(f"{name}_bz_right",
             cx=w * 0.43, cy=bz_y, cz=h / 2,
             w=w * 0.08, d=bz_d, h=h - 0.004, collection=col))
+        # ── Port label identification strip (between ports and top bezel) ─
+        parts.append(_create_box_object(f"{name}_label",
+            cx=0.0, cy=-0.001, cz=h * 0.86,
+            w=w * 0.82, d=0.0015, h=h * 0.05, collection=col))
 
     if qf["server_bays"]:
         # ── Port grid ─────────────────────────────────────────────────────
@@ -769,15 +804,31 @@ def create_patch_panel(
                 cx=sep_x, cy=-0.0015, cz=h * 0.55,
                 w=0.0015, d=0.003, h=h * 0.65, collection=col))
 
-        # ── Cable management rings ────────────────────────────────────────
+        # ── Cable management D-rings (two-post + arch geometry) ───────────
         ring_count   = 4 if port_count <= 24 else 6
         ring_area_w  = w * 0.70
         ring_spacing = ring_area_w / (ring_count + 1)
+        ring_cz      = h * 0.11
+        ring_h_dim   = 0.010
+        ring_post_w  = 0.0025
+        ring_top_h   = 0.0025
+        ring_d       = 0.004
+        ring_span    = 0.013
         for i in range(ring_count):
             rx = -(ring_area_w / 2) + ring_spacing * (i + 1)
-            parts.append(_create_box_object(f"{name}_ring_{i}",
-                cx=rx, cy=-0.005, cz=h * 0.11,
-                w=0.011, d=0.004, h=0.008, collection=col))
+            # Left post
+            parts.append(_create_box_object(f"{name}_ring_L_{i}",
+                cx=rx - ring_span / 2, cy=-0.005, cz=ring_cz,
+                w=ring_post_w, d=ring_d, h=ring_h_dim, collection=col))
+            # Right post
+            parts.append(_create_box_object(f"{name}_ring_R_{i}",
+                cx=rx + ring_span / 2, cy=-0.005, cz=ring_cz,
+                w=ring_post_w, d=ring_d, h=ring_h_dim, collection=col))
+            # Top arch bar
+            parts.append(_create_box_object(f"{name}_ring_T_{i}",
+                cx=rx, cy=-0.005,
+                cz=ring_cz + ring_h_dim / 2 + ring_top_h / 2,
+                w=ring_span + ring_post_w, d=ring_d, h=ring_top_h, collection=col))
 
     # ── Mounting ears — always present ────────────────────────────────────
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
