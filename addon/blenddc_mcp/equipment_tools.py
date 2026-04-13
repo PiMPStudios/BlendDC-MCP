@@ -262,8 +262,8 @@ def create_server_chassis(
             parts.append(bay_tray)
 
             if qf["server_bays"]:
-                # Eject handle: prominent on ultra, subtle tab on high/medium
-                hdl_d = 0.003 if qf["bay_3d"] else 0.0015
+                # Eject handle: prominent on ultra, visible tab on high/medium
+                hdl_d = 0.004 if qf["bay_3d"] else 0.0025
                 bay_hdl = _create_box_object(
                     f"{name}_bay_hdl_{i:02d}",
                     cx=bx, cy=-bay_hsg_depth - hdl_d / 2,
@@ -409,14 +409,14 @@ def create_server_chassis(
     joined = _join_parts(parts, name)
 
     # ── Per-server material variation ─────────────────────────────────────
-    # When random_variation is on, each chassis gets a unique Principled BSDF
-    # with slightly different base colour, roughness, and metallic so no two
-    # adjacent servers look identical in a populated rack.
-    if random_variation:
-        _var_mat = bpy.data.materials.new(f"{name}_var")
-        _var_mat.use_nodes = True
-        _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
-        if _var_bsdf:
+    # Always applied: keeps each chassis slightly unique even without full
+    # random_variation. Full range (colour + sheen) when random_variation=True;
+    # narrow roughness/metallic-only shift when False.
+    _var_mat = bpy.data.materials.new(f"{name}_var")
+    _var_mat.use_nodes = True
+    _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
+    if _var_bsdf:
+        if random_variation:
             _base = 0.07 + _random.uniform(-0.018, 0.022)
             _var_bsdf.inputs["Base Color"].default_value = (
                 max(0.03, _base + _random.uniform(-0.008, 0.008)),
@@ -428,6 +428,16 @@ def create_server_chassis(
                 0.50 + _random.uniform(-0.10, 0.15)))
             _var_bsdf.inputs["Metallic"].default_value = max(0.50, min(0.85,
                 0.70 + _random.uniform(-0.10, 0.08)))
+        else:
+            _var_bsdf.inputs["Base Color"].default_value = (0.07, 0.07, 0.08, 1.0)
+            _var_bsdf.inputs["Roughness"].default_value = max(0.38, min(0.62,
+                0.50 + _random.uniform(-0.06, 0.06)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.60, min(0.80,
+                0.70 + _random.uniform(-0.05, 0.05)))
+    # Replace slot 0 so all faces (currently on the default slot) pick it up
+    if joined.data.materials:
+        joined.data.materials[0] = _var_mat
+    else:
         joined.data.materials.append(_var_mat)
 
     # ── SOCKET_ empties parented to joined chassis ─────────────────────────
@@ -558,14 +568,18 @@ def create_network_switch(
                 cx=sep_x, cy=-0.0015, cz=h * 0.50,
                 w=0.002, d=0.004, h=h * 0.72, collection=col))
 
-        # ── Per-port status LEDs (one LED per port above each tile) ───────
-        led_row_z = port_cz_base + rows * (port_h + 0.002) + h * 0.035
-        for p in range(ports_per_row):
+        # ── Per-port status LEDs ───────────────────────────────────────────
+        # 48-port: every other port (stride 2) + slightly smaller to avoid clutter
+        # 24-port: one per port
+        led_row_z  = port_cz_base + rows * (port_h + 0.002) + h * 0.035
+        led_stride = 2 if port_count >= 48 else 1
+        led_w_fac  = 0.38 if port_count >= 48 else 0.45
+        for p in range(0, ports_per_row, led_stride):
             lx = _jitter(-(port_area_w / 2) + p * port_w + port_w / 2, 0.0002, rv)
             lz = _jitter(led_row_z, 0.0003, rv)
             parts.append(_create_box_object(f"{name}_led_{p:02d}",
                 cx=lx, cy=-0.0025, cz=lz,
-                w=port_w * 0.45, d=0.0025, h=h * 0.05,
+                w=port_w * led_w_fac, d=0.0025, h=h * 0.05,
                 collection=col))
 
         # ── SFP uplink ports ──────────────────────────────────────────────
@@ -657,11 +671,11 @@ def create_network_switch(
     joined = _join_parts(parts, name)
 
     # ── Per-switch material variation ─────────────────────────────────────
-    if random_variation:
-        _var_mat = bpy.data.materials.new(f"{name}_var")
-        _var_mat.use_nodes = True
-        _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
-        if _var_bsdf:
+    _var_mat = bpy.data.materials.new(f"{name}_var")
+    _var_mat.use_nodes = True
+    _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
+    if _var_bsdf:
+        if random_variation:
             _base = 0.05 + _random.uniform(-0.015, 0.020)
             _var_bsdf.inputs["Base Color"].default_value = (
                 max(0.03, _base + _random.uniform(-0.008, 0.008)),
@@ -673,6 +687,15 @@ def create_network_switch(
                 0.45 + _random.uniform(-0.10, 0.15)))
             _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
                 0.65 + _random.uniform(-0.10, 0.08)))
+        else:
+            _var_bsdf.inputs["Base Color"].default_value = (0.05, 0.05, 0.055, 1.0)
+            _var_bsdf.inputs["Roughness"].default_value = max(0.28, min(0.55,
+                0.40 + _random.uniform(-0.06, 0.06)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.55, min(0.80,
+                0.65 + _random.uniform(-0.05, 0.05)))
+    if joined.data.materials:
+        joined.data.materials[0] = _var_mat
+    else:
         joined.data.materials.append(_var_mat)
 
     # ── SOCKET_ empties ────────────────────────────────────────────────────
@@ -809,11 +832,11 @@ def create_patch_panel(
         ring_area_w  = w * 0.70
         ring_spacing = ring_area_w / (ring_count + 1)
         ring_cz      = h * 0.11
-        ring_h_dim   = 0.010
-        ring_post_w  = 0.0025
-        ring_top_h   = 0.0025
-        ring_d       = 0.004
-        ring_span    = 0.013
+        ring_h_dim   = 0.013
+        ring_post_w  = 0.003
+        ring_top_h   = 0.003
+        ring_d       = 0.005
+        ring_span    = 0.019
         for i in range(ring_count):
             rx = -(ring_area_w / 2) + ring_spacing * (i + 1)
             # Left post
@@ -850,12 +873,12 @@ def create_patch_panel(
 
     # ── Per-panel material variation ──────────────────────────────────────
     # Patch panels are typically lighter than servers (grey/silver anodised).
-    # Variation shifts colour temperature and sheen so adjacent panels differ.
-    if random_variation:
-        _var_mat = bpy.data.materials.new(f"{name}_var")
-        _var_mat.use_nodes = True
-        _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
-        if _var_bsdf:
+    # Always applied — full range when random_variation=True, narrow when False.
+    _var_mat = bpy.data.materials.new(f"{name}_var")
+    _var_mat.use_nodes = True
+    _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
+    if _var_bsdf:
+        if random_variation:
             _base = 0.68 + _random.uniform(-0.06, 0.10)
             _var_bsdf.inputs["Base Color"].default_value = (
                 max(0.50, _base + _random.uniform(-0.03, 0.03)),
@@ -867,7 +890,16 @@ def create_patch_panel(
                 0.42 + _random.uniform(-0.10, 0.15)))
             _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
                 0.60 + _random.uniform(-0.10, 0.10)))
-        joined.data.materials.append(_var_mat)
+        else:
+            _var_bsdf.inputs["Base Color"].default_value = (0.68, 0.68, 0.70, 1.0)
+            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.55,
+                0.40 + _random.uniform(-0.05, 0.05)))
+            _var_bsdf.inputs["Metallic"].default_value = max(0.50, min(0.75,
+                0.60 + _random.uniform(-0.05, 0.05)))
+        if joined.data.materials:
+            joined.data.materials[0] = _var_mat
+        else:
+            joined.data.materials.append(_var_mat)
 
     # ── SOCKET_ empties ────────────────────────────────────────────────────
     sockets_created: List[str] = []
