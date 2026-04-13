@@ -165,7 +165,7 @@ def _create_raised_floor(
     tile_type: str = 'solid',
 ) -> None:
     """
-    Create a Tate-style raised floor system in the specified XY zone.
+    Create a raised floor system in the specified XY zone.
 
     Generates a full pedestal grid (base plate + shaft + head plate) and
     stringers, all joined into a single {zone_name}_Structure mesh (never
@@ -280,7 +280,7 @@ def _create_raised_floor(
             name = f"{zone_name}_tile_{ix}_{iy}"
 
             if tile_type == 'perforated':
-                # Perforated tile: waffle grid of bars matching Tate PERF 1250 spec.
+                # Perforated tile: waffle grid of bars.
                 # 15 mm bars / 15 mm gaps → 30 mm pitch → 25 % open area.
                 # X-running bars + Y-running bars create a square-hole grid pattern.
                 perf_bar  = 0.015
@@ -562,7 +562,7 @@ def create_raised_floor(
                 if ttype == "solid":
                     _box(tcx, tcy, tile_cz, tw, td, RF_TILE_H_M)
                 else:
-                    # Perforated — Tate PERF 1250 waffle grid
+                    # Perforated — waffle grid
                     n_pb  = int(tw / perf_pitch)
                     p_off = (tw - n_pb * perf_pitch) / 2.0
                     for k in range(n_pb):
@@ -912,7 +912,7 @@ def create_facility_section(
                 "y_m":   round(by, 4),
             })
 
-    # ── Raised floor system (Tate-style: pedestals + stringers + tiles) ─────
+    # ── Raised floor system (pedestals + stringers + tiles) ──────────────────
     # Single unified zone from front corridor to rear corridor, all solid tiles.
     # One continuous pedestal grid — no zone seams, no gaps.
     # Cold-aisle tiles are swapped to perforated later once racks are placed.

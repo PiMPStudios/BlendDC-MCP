@@ -126,7 +126,7 @@ VERT_CABLE_MGMT_WIDTH_M  = 0.050          # 50 mm vertical channel width
 LOD1_DEFAULT_RATIO = 0.40   # LOD1 target: 40 % of LOD0 triangles
 LOD2_DEFAULT_RATIO = 0.15   # LOD2 target: 15 % of LOD0 triangles
 
-# ── Raised floor system (Tate-style) ──────────────────────────────────────
+# ── Raised floor system ───────────────────────────────────────────────────
 # Pedestals: 150×150mm base plate, 50mm square shaft, 100×100mm head plate
 # Tile surface is at Z=0 (finished floor); all raised floor geometry is at Z < 0
 RF_PEDESTAL_BASE_W_M  = 0.150   # 150 mm base plate width / depth
