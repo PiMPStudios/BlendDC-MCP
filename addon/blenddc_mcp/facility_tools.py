@@ -335,7 +335,7 @@ def create_raised_floor(
     # for clean perforated tile coverage; default 1200 mm = 2 × 600 mm tiles).
     cold_aisle_depth_mm: float = 1200.0,
     # Hot aisle = back-face to back-face distance between adjacent pairs.
-    hot_aisle_depth_mm: float = 1200.0,
+    hot_aisle_depth_mm: float = 1000.0,
     row_x_start_m: float = 0.0,
     # Y position of the FIRST FRONT FACE.
     # Row 0 (facing +Y) has its front face here; it extends rack_depth_mm
@@ -620,6 +620,87 @@ def create_raised_floor(
         "finished_floor_z_m": RF_PEDESTAL_TOTAL_H_M,
         "rack_placement":   rack_placement,
         "warnings":         [],
+    }
+
+
+@mcp.tool()
+@thread_safe
+def place_racks_from_floor(
+    rack_placement: List[Dict],
+    racks_per_row: int,
+    rack_name_prefix: str = "Rack",
+    u_height: int = 42,
+    width_mm: float = 600.0,
+    depth_mm: float = 1000.0,
+) -> Dict[str, Any]:
+    """
+    Create and position rack cabinets using the rack_placement list returned by
+    create_raised_floor.
+
+    Handles bracket logic (floor brackets only on exposed end faces) and moves
+    every object whose name starts with the rack prefix — including _Rails_LOD1
+    and any future parts — using a prefix match rather than a hardcoded suffix
+    list.
+
+    rack_placement:   the 'rack_placement' list from create_raised_floor's return dict
+    racks_per_row:    number of rack slots per row (needed for bracket logic)
+    rack_name_prefix: prefix for generated rack names (default "Rack")
+    u_height:         rack height in U (default 42)
+    width_mm:         rack width in mm (default 600)
+    depth_mm:         rack depth in mm (default 1000)
+
+    Returns a dict with the names of all placed racks and any warnings.
+    """
+    import math as _math
+    import rack_tools as rt
+
+    placed   : List[str] = []
+    warnings : List[str] = []
+
+    for p in rack_placement:
+        ri, si    = p["row"], p["slot"]
+        is_first  = (si == 0)
+        is_last   = (si == racks_per_row - 1)
+        facing_neg_y = (p["rot_z_deg"] == 0.0)
+
+        # Floor brackets only on the exposed (non-adjacent) end faces of each row.
+        bl = (facing_neg_y and is_first) or (not facing_neg_y and is_last)
+        br = (facing_neg_y and is_last)  or (not facing_neg_y and is_first)
+
+        rack_name = f"{rack_name_prefix}_R{ri}S{si}"
+        rt.create_rack_cabinet.__wrapped__(
+            name=rack_name,
+            u_height=u_height,
+            width_mm=width_mm,
+            depth_mm=depth_mm,
+            bracket_left=bl,
+            bracket_right=br,
+        )
+
+        # Move every object whose name starts with rack_name (prefix match).
+        # This covers _Body, _Shell, _Rails, _Rails_LOD1, and any future parts.
+        prefix   = rack_name + "_"
+        rot_rad  = _math.radians(p["rot_z_deg"])
+        dx, dy, dz = p["x"], p["y"], p["z"]
+
+        moved_any = False
+        for obj in bpy.data.objects:
+            if obj.name == rack_name or obj.name.startswith(prefix):
+                obj.location.x       += dx
+                obj.location.y       += dy
+                obj.location.z       += dz
+                obj.rotation_euler.z += rot_rad
+                moved_any = True
+
+        if not moved_any:
+            warnings.append(f"No objects found for rack '{rack_name}'")
+        else:
+            placed.append(rack_name)
+
+    return {
+        "racks_placed": len(placed),
+        "placed":       placed,
+        "warnings":     warnings,
     }
 
 
