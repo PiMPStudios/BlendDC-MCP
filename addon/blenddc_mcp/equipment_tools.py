@@ -216,10 +216,12 @@ def create_server_chassis(
             bay_cols = max(1, (actual_bays + 1) // 2)
             bay_rows = 2 if actual_bays > 1 else 1
 
-            bay_left   = -(w * 0.5) + 0.015   # 15 mm from left body edge
-            bay_area_w = w * 0.70              # 70% of body width
-            bay_area_h = h * 0.78              # 78% of chassis height
+            bay_left    = -(w * 0.5) + 0.015   # 15 mm from left body edge
+            bay_area_w  = w * 0.70              # 70% of body width
+            bay_area_h  = h * 0.78              # 78% of chassis height
             bay_area_z0 = (h - bay_area_h) / 2
+            bay_cx      = bay_left + bay_area_w / 2
+            bay_cz      = bay_area_z0 + bay_area_h / 2
 
             gap_x = 0.0015
             gap_z = 0.0020
@@ -227,50 +229,64 @@ def create_server_chassis(
             bay_w = (bay_area_w - gap_x * (bay_cols - 1)) / bay_cols
             bay_h = (bay_area_h - gap_z * (bay_rows - 1)) / bay_rows
 
-            bay_hsg_depth = 0.008 if qf["bay_3d"] else 0.005
+            # ── Optimised bay geometry: 1 background plate + separators +
+            #    per-carrier face plates.  Replaces per-bay housing/tray/lip
+            #    stack (5 objects × N bays) with a shared grid — ~55% fewer tris.
+            bg_d = 0.008 if qf["bay_3d"] else 0.004
 
+            # Single recessed background spanning the whole bay zone
+            parts.append(_create_box_object(f"{name}_bay_bg",
+                cx=bay_cx, cy=-bg_d / 2, cz=bay_cz,
+                w=bay_area_w, d=bg_d, h=bay_area_h, collection=col))
+
+            # Vertical separators between columns (fills the gap_x slots)
+            for ci in range(1, bay_cols):
+                sx = bay_left + ci * (bay_w + gap_x) - gap_x / 2
+                parts.append(_create_box_object(f"{name}_bay_vsep_{ci}",
+                    cx=sx, cy=-bg_d / 2 - 0.0005, cz=bay_cz,
+                    w=gap_x, d=bg_d + 0.001, h=bay_area_h, collection=col))
+
+            # Horizontal separator between rows
+            if bay_rows == 2:
+                hs_z = bay_area_z0 + bay_h + gap_z / 2
+                parts.append(_create_box_object(f"{name}_bay_hsep",
+                    cx=bay_cx, cy=-bg_d / 2 - 0.0005, cz=hs_z,
+                    w=bay_area_w, d=bg_d + 0.001, h=gap_z, collection=col))
+
+            # Individual carrier face plates + per-row handle strip
             for row in range(bay_rows):
+                rz = bay_area_z0 + (row + 0.5) * bay_h + row * gap_z
                 for col_i in range(bay_cols):
                     idx = row * bay_cols + col_i
                     if idx >= actual_bays:
                         break
-
                     bx = bay_left + (col_i + 0.5) * bay_w + col_i * gap_x
-                    bz = bay_area_z0 + (row + 0.5) * bay_h + row * gap_z
                     bx = _jitter(bx, 0.0005, random_variation)
 
-                    bw     = bay_w - 0.001
-                    bh_dim = bay_h - 0.001
+                    # Carrier face (thin plate proud of background)
+                    parts.append(_create_box_object(f"{name}_carr_{idx:02d}",
+                        cx=bx, cy=-0.0020, cz=rz,
+                        w=bay_w - 0.002, d=0.004, h=bay_h - 0.002, collection=col))
 
-                    # Bay outer housing
-                    parts.append(_create_box_object(f"{name}_bay_hsg_{idx:02d}",
-                        cx=bx, cy=-bay_hsg_depth / 2, cz=bz,
-                        w=bw, d=bay_hsg_depth, h=bh_dim, collection=col))
-
-                    # Bay inner tray face
-                    parts.append(_create_box_object(f"{name}_bay_tray_{idx:02d}",
-                        cx=bx, cy=-bay_hsg_depth * 0.40, cz=bz,
-                        w=bw * 0.86, d=bay_hsg_depth * 0.55, h=bh_dim * 0.82,
-                        collection=col))
-
-                    if qf["server_bays"]:
-                        hdl_d  = 0.004 if qf["bay_3d"] else 0.0025
-                        hdl_cz = bz - bh_dim * 0.40
+                    if qf["bay_3d"]:
+                        # ultra: individual eject handles per bay
                         parts.append(_create_box_object(f"{name}_bay_hdl_{idx:02d}",
-                            cx=bx, cy=-bay_hsg_depth - hdl_d / 2, cz=hdl_cz,
-                            w=bw * 0.62, d=hdl_d, h=h * 0.028, collection=col))
-                        if qf["bezel"]:
-                            parts.append(_create_box_object(f"{name}_bay_hdl_lip_{idx:02d}",
-                                cx=bx, cy=-bay_hsg_depth - hdl_d - 0.0005,
-                                cz=hdl_cz + h * 0.015,
-                                w=bw * 0.64, d=0.001, h=0.001, collection=col))
+                            cx=bx - (bay_w / 2) + 0.005, cy=-bg_d - 0.003, cz=rz,
+                            w=0.004, d=0.003, h=bay_h - 0.004, collection=col))
 
-                    if qf["bezel"]:
-                        # Activity LED — top-left corner of bay face
-                        parts.append(_create_box_object(f"{name}_bay_led_{idx:02d}",
-                            cx=bx - bw * 0.36, cy=-bay_hsg_depth * 0.35,
-                            cz=bz + bh_dim * 0.38,
-                            w=0.003, d=0.002, h=0.003, collection=col))
+                if not qf["bay_3d"] and qf["server_bays"]:
+                    # high/medium: one handle rail per row (cheap single box)
+                    parts.append(_create_box_object(f"{name}_bay_hdl_row_{row}",
+                        cx=bay_left + 0.004, cy=-bg_d - 0.003, cz=rz,
+                        w=0.004, d=0.003, h=bay_h - 0.004, collection=col))
+
+            if qf["bezel"]:
+                # Activity LED strip — one slim box per row (top-left corner)
+                for row in range(bay_rows):
+                    lz = bay_area_z0 + (row + 0.5) * bay_h + row * gap_z + bay_h * 0.37
+                    parts.append(_create_box_object(f"{name}_bay_led_{row}",
+                        cx=bay_left + 0.009, cy=-bg_d - 0.001, cz=lz,
+                        w=0.003, d=0.001, h=0.002, collection=col))
 
         # Right control panel zone
         ctrl_cx = w * 0.385
