@@ -232,7 +232,7 @@ def create_server_chassis(
             # ── Optimised bay geometry: 1 background plate + separators +
             #    per-carrier face plates.  Replaces per-bay housing/tray/lip
             #    stack (5 objects × N bays) with a shared grid — ~55% fewer tris.
-            bg_d = 0.008 if qf["bay_3d"] else 0.004
+            bg_d = 0.014 if qf.get("deep_bays") else (0.008 if qf["bay_3d"] else 0.004)
 
             # Single recessed background spanning the whole bay zone
             parts.append(_create_box_object(f"{name}_bay_bg",
@@ -270,9 +270,21 @@ def create_server_chassis(
 
                     if qf["bay_3d"]:
                         # ultra: individual eject handles per bay
+                        hdl_cx = bx - (bay_w / 2) + 0.005
                         parts.append(_create_box_object(f"{name}_bay_hdl_{idx:02d}",
-                            cx=bx - (bay_w / 2) + 0.005, cy=-bg_d - 0.003, cz=rz,
+                            cx=hdl_cx, cy=-bg_d - 0.003, cz=rz,
                             w=0.004, d=0.003, h=bay_h - 0.004, collection=col))
+                        if qf.get("detailed_handles"):
+                            # hero: pivot pin stubs at top and bottom of handle
+                            for pin_z_off in (-bay_h * 0.44, bay_h * 0.44):
+                                parts.append(_create_box_object(
+                                    f"{name}_bay_pin_{idx:02d}_{('T' if pin_z_off > 0 else 'B')}",
+                                    cx=hdl_cx, cy=-bg_d - 0.0055, cz=rz + pin_z_off,
+                                    w=0.006, d=0.002, h=0.003, collection=col))
+                            # latch tab (small proud nub on carrier face, right edge)
+                            parts.append(_create_box_object(f"{name}_bay_latch_{idx:02d}",
+                                cx=bx + (bay_w / 2) - 0.004, cy=-0.0035, cz=rz,
+                                w=0.004, d=0.002, h=bay_h * 0.28, collection=col))
 
                 if not qf["bay_3d"] and qf["server_bays"]:
                     # high/medium: one handle rail per row (cheap single box)
@@ -287,6 +299,11 @@ def create_server_chassis(
                     parts.append(_create_box_object(f"{name}_bay_led_{row}",
                         cx=bay_left + 0.009, cy=-bg_d - 0.001, cz=lz,
                         w=0.003, d=0.001, h=0.002, collection=col))
+                    if qf.get("led_emissive"):
+                        # hero: proud lens dome on each LED
+                        parts.append(_create_box_object(f"{name}_bay_led_lens_{row}",
+                            cx=bay_left + 0.009, cy=-bg_d - 0.0025, cz=lz,
+                            w=0.0025, d=0.0015, h=0.0025, collection=col))
 
         # Right control panel zone
         ctrl_cx = w * 0.385
@@ -301,10 +318,18 @@ def create_server_chassis(
             parts.append(_create_box_object(f"{name}_pwr",
                 cx=ctrl_cx, cy=-0.003, cz=pwr_z,
                 w=0.008, d=0.003, h=0.008, collection=col))
+            if qf.get("led_emissive"):
+                parts.append(_create_box_object(f"{name}_pwr_lens",
+                    cx=ctrl_cx, cy=-0.0048, cz=pwr_z,
+                    w=0.006, d=0.0015, h=0.006, collection=col))
 
             parts.append(_create_box_object(f"{name}_uid",
                 cx=ctrl_cx, cy=-0.002, cz=h * 0.57,
                 w=0.005, d=0.002, h=0.005, collection=col))
+            if qf.get("led_emissive"):
+                parts.append(_create_box_object(f"{name}_uid_lens",
+                    cx=ctrl_cx, cy=-0.0038, cz=h * 0.57,
+                    w=0.004, d=0.0015, h=0.004, collection=col))
 
             for li, lz_frac in enumerate((0.44, 0.37, 0.30)):
                 lz = _jitter(h * lz_frac, 0.001, random_variation)
@@ -726,20 +751,33 @@ def create_server_chassis(
             parts.append(ear_slot)
 
         if qf["ear_screws"]:
-            # ultra: two visible screw-head bumps on ear face (M6 cap screws)
-            for screw_frac in (0.30, 0.70):
-                screw = _create_box_object(
-                    f"{name}_ear_screw_{side_label}_{int(screw_frac*10)}",
-                    cx=ear_cx, cy=-ear_d + 0.0015, cz=h * screw_frac,
-                    w=0.006, d=0.002, h=0.006,
-                    collection=col,
-                )
-                parts.append(screw)
+            # ultra: visible screw-head bumps on ear face (M6 cap screws)
+            # hero: four screws with Phillips cross grooves
+            screw_fracs = (0.20, 0.42, 0.60, 0.80) if qf.get("detailed_screws") else (0.30, 0.70)
+            for screw_frac in screw_fracs:
+                screw_y = -ear_d + 0.0018
+                parts.append(_create_box_object(
+                    f"{name}_ear_screw_{side_label}_{int(screw_frac*100)}",
+                    cx=ear_cx, cy=screw_y, cz=h * screw_frac,
+                    w=0.006, d=0.002, h=0.006, collection=col))
+                if qf.get("detailed_screws"):
+                    # Phillips cross: horizontal + vertical thin bars on face
+                    for dim in ("H", "V"):
+                        parts.append(_create_box_object(
+                            f"{name}_ear_screw_{side_label}_{int(screw_frac*100)}_{dim}",
+                            cx=ear_cx,
+                            cy=screw_y - 0.0008,
+                            cz=h * screw_frac,
+                            w=0.0035 if dim == "H" else 0.0010,
+                            d=0.0008,
+                            h=0.0010 if dim == "H" else 0.0035,
+                            collection=col))
 
     if qf["vents"]:
         # ── Side ventilation slots (horizontal louvre strips) ─────────────
-        vent_count  = 4 if u_size == 1 else 6
-        vent_h_dim  = max(0.003, h * 0.038)
+        _base_vents = 4 if u_size == 1 else 6
+        vent_count  = _base_vents * 2 if qf.get("high_poly_grilles") else _base_vents
+        vent_h_dim  = max(0.002, h * (0.022 if qf.get("high_poly_grilles") else 0.038))
         vent_d_len  = d * 0.55
         vent_cy     = d * 0.25 + vent_d_len / 2
         vent_z_start = h * 0.18
@@ -997,6 +1035,22 @@ def create_server_chassis(
         parts.append(_create_box_object(f"{name}_rear_cable_bar",
             cx=0.0, cy=d + 0.015, cz=h - 0.006,
             w=w * 0.84, d=0.008, h=0.005, collection=col))
+
+    # ── Hero: chamfer strips at key chassis edges (proper_bevels) ────────────
+    if qf.get("proper_bevels"):
+        bevel_t = 0.0015   # 1.5 mm chamfer strip thickness
+        # Top-front edge
+        parts.append(_create_box_object(f"{name}_bvl_top_front",
+            cx=0.0, cy=-bevel_t / 2, cz=h - bevel_t / 2,
+            w=w - 0.004, d=bevel_t, h=bevel_t, collection=col))
+        # Bottom-front edge
+        parts.append(_create_box_object(f"{name}_bvl_bot_front",
+            cx=0.0, cy=-bevel_t / 2, cz=bevel_t / 2,
+            w=w - 0.004, d=bevel_t, h=bevel_t, collection=col))
+        # Top-rear edge
+        parts.append(_create_box_object(f"{name}_bvl_top_rear",
+            cx=0.0, cy=d + bevel_t / 2, cz=h - bevel_t / 2,
+            w=w - 0.004, d=bevel_t, h=bevel_t, collection=col))
 
     # ── Join + origin ──────────────────────────────────────────────────────
     joined = _join_parts(parts, name)
@@ -1321,13 +1375,27 @@ def create_network_switch(
             parts.append(_create_box_object(f"{name}_ear_slot_{side_label}",
                 cx=ear_cx, cy=-ear_d + 0.001, cz=h * 0.50,
                 w=ear_w * 0.30, d=0.001, h=h * 0.22, collection=col))
+            if qf.get("detailed_screws"):
+                for sfrac in (0.25, 0.50, 0.75):
+                    sy = -ear_d + 0.0018
+                    parts.append(_create_box_object(f"{name}_ear_scr_{side_label}_{int(sfrac*100)}",
+                        cx=ear_cx, cy=sy, cz=h * sfrac,
+                        w=0.006, d=0.002, h=0.006, collection=col))
+                    for dim in ("H", "V"):
+                        parts.append(_create_box_object(
+                            f"{name}_ear_scr_{side_label}_{int(sfrac*100)}_{dim}",
+                            cx=ear_cx, cy=sy - 0.0008, cz=h * sfrac,
+                            w=0.0035 if dim == "H" else 0.0010,
+                            d=0.0008,
+                            h=0.0010 if dim == "H" else 0.0035,
+                            collection=col))
 
     # ─────────────────────────────────────────────────────────────────────
     # SIDE VENTILATION
     # ─────────────────────────────────────────────────────────────────────
     if qf["vents"]:
-        vent_count  = 5
-        vent_h_dim  = max(0.003, h * 0.038)
+        vent_count  = 9 if qf.get("high_poly_grilles") else 5
+        vent_h_dim  = max(0.002, h * (0.020 if qf.get("high_poly_grilles") else 0.038))
         vent_d_len  = d * 0.52
         vent_cy     = d * 0.32 + vent_d_len / 2
         vent_z_base = h * 0.20
@@ -1365,7 +1433,7 @@ def create_network_switch(
                 w=outer, d=0.004, h=outer, collection=col))
             # Fan blade bars (horizontal slots inside ring)
             if qf["bay_3d"]:
-                n_blades = 5
+                n_blades = 9 if qf.get("high_poly_grilles") else 5
                 blade_h  = (FAN_D - 0.006) / (n_blades * 2 - 1)
                 for bi in range(n_blades):
                     bz = fan_cz - FAN_D / 2 + 0.003 + bi * blade_h * 2 + blade_h / 2
@@ -1374,6 +1442,11 @@ def create_network_switch(
                         cx=fan_cx, cy=rear_y + 0.0018, cz=bz,
                         w=FAN_D - 0.010, d=0.0030,
                         h=blade_h * 0.62, collection=col))
+                if qf.get("high_poly_grilles"):
+                    # hero: fan hub centre stub
+                    parts.append(_create_box_object(f"{name}_fan_hub_{fi}",
+                        cx=fan_cx, cy=rear_y + 0.0025, cz=fan_cz,
+                        w=0.018, d=0.003, h=0.018, collection=col))
 
         # C14 IEC power inlet — right side
         c14_cx = w * 0.43

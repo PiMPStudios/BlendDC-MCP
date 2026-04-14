@@ -184,81 +184,160 @@ RACK_CROSSBAR_T_M = 0.004   # 4 mm thick
 # ── Quality tiers — single source of truth ────────────────────────────────
 # Each tier maps to a flat dict of feature flags consumed by create_rack_cabinet,
 # create_server_chassis, create_network_switch, create_patch_panel,
-# create_raised_floor, and export_rack_collection_ue5.
+# create_raised_floor, export_rack_collection_ue5, and create_pdu.
 #
 # Tiers in descending detail order:
-#   ultra  → hero-quality, maximum geometry, no compromises
+#   hero   → cinematic / marketing renders; unrestricted poly count
+#   ultra  → game-ready hero asset; maximum detail within budget
 #   high   → default; detailed but not hero (current historical behaviour)
 #   medium → balanced; suitable for mid-distance rendering
 #   low    → performance; box proxies + single-mesh floor for far-LOD / mobile
+#
+# Hero-exclusive flags (False on all other tiers):
+#   deep_bays        — drive bay background plate depth + per-carrier latch tab
+#   detailed_screws  — Phillips-head screw geometry on mounting ears
+#   realistic_ports  — inner port plastic detail and retention clip stubs
+#   detailed_rear    — full rear-panel treatment on 1U servers and PDUs
+#   subtle_wear      — micro-variation material hints (geometry markers)
+#   high_poly_grilles— increased vent bar/louvre density for close-up shots
+#   proper_bevels    — chamfer strips at key chassis edges
+#   led_emissive     — proud lens dome on each LED element
+#   detailed_handles — drive handle end pivot pins + finger-groove suggestion
 QUALITY_TIERS: dict = {
+    "hero": {
+        # ── Rack rails & structure (superset of ultra) ──────────────────
+        "eia_holes":          True,
+        "lod_rails":          True,
+        "rack_rails":         True,
+        "fan_tray":           True,
+        "crossbars":          True,
+        # ── Server / switch bezel & detail ──────────────────────────────
+        "bezel":              True,
+        "server_bays":        True,
+        "bay_3d":             True,
+        "vents":              True,
+        "grille":             True,
+        "ear_screws":         True,
+        # ── Floor ───────────────────────────────────────────────────────
+        "floor_perforated":   True,
+        "floor_single_mesh":  False,
+        # ── Export ──────────────────────────────────────────────────────
+        "lod_level":          0,
+        # ── Hero-exclusive ───────────────────────────────────────────────
+        "deep_bays":          True,   # deeper bg plate + per-carrier latch tab
+        "detailed_screws":    True,   # Phillips-head geometry on ear screws
+        "realistic_ports":    True,   # inner port plastic + retention clips
+        "detailed_rear":      True,   # full rear panel on 1U devices
+        "subtle_wear":        True,   # geometry markers for wear/dirt maps
+        "high_poly_grilles":  True,   # denser vent bars and louvre counts
+        "proper_bevels":      True,   # chamfer strips at key edges
+        "led_emissive":       True,   # proud lens dome over every LED
+        "detailed_handles":   True,   # drive handle pivot pins + grip groove
+    },
     "ultra": {
         # Rack rails
-        "eia_holes":         True,   # full EIA-310 punched through-holes
-        "lod_rails":         True,   # also emit _Rails_LOD1 solid variant
-        "rack_rails":        True,   # include rail flanges at all
+        "eia_holes":          True,   # full EIA-310 punched through-holes
+        "lod_rails":          True,   # also emit _Rails_LOD1 solid variant
+        "rack_rails":         True,   # include rail flanges at all
         # Rack structural
-        "fan_tray":          True,
-        "crossbars":         True,
+        "fan_tray":           True,
+        "crossbars":          True,
         # Server / switch bezel & detail
-        "bezel":             True,   # top/bottom/right bezel frame strips
-        "server_bays":       True,   # drive bay surrounds on server bezel
-        "bay_3d":            True,   # deep 8 mm bay housing recesses (ultra only)
-        "vents":             True,   # side ventilation louvre strips
-        "grille":            True,   # rear exhaust tile grille
-        "ear_screws":        True,   # visible screw head bumps on mounting ears
+        "bezel":              True,   # top/bottom/right bezel frame strips
+        "server_bays":        True,   # drive bay surrounds on server bezel
+        "bay_3d":             True,   # deep 8 mm bay housing recesses
+        "vents":              True,   # side ventilation louvre strips
+        "grille":             True,   # rear exhaust tile grille
+        "ear_screws":         True,   # visible screw-head bumps on mounting ears
         # Floor
-        "floor_perforated":  True,   # waffle-grid perforated tiles in cold aisles
-        "floor_single_mesh": False,  # collapse entire floor to one flat mesh
+        "floor_perforated":   True,   # waffle-grid perforated tiles in cold aisles
+        "floor_single_mesh":  False,  # collapse entire floor to one flat mesh
         # Export
-        "lod_level":         0,
+        "lod_level":          0,
+        # Hero flags — all False for ultra
+        "deep_bays":          False,
+        "detailed_screws":    False,
+        "realistic_ports":    False,
+        "detailed_rear":      False,
+        "subtle_wear":        False,
+        "high_poly_grilles":  False,
+        "proper_bevels":      False,
+        "led_emissive":       False,
+        "detailed_handles":   False,
     },
     "high": {
-        "eia_holes":         True,
-        "lod_rails":         True,
-        "rack_rails":        True,
-        "fan_tray":          True,
-        "crossbars":         True,
-        "bezel":             True,
-        "server_bays":       True,
-        "bay_3d":            False,  # flat bay faces (no deep housing)
-        "vents":             True,
-        "grille":            True,
-        "ear_screws":        False,
-        "floor_perforated":  True,
-        "floor_single_mesh": False,
-        "lod_level":         1,
+        "eia_holes":          True,
+        "lod_rails":          True,
+        "rack_rails":         True,
+        "fan_tray":           True,
+        "crossbars":          True,
+        "bezel":              True,
+        "server_bays":        True,
+        "bay_3d":             False,  # flat bay faces (no deep housing)
+        "vents":              True,
+        "grille":             True,
+        "ear_screws":         False,
+        "floor_perforated":   True,
+        "floor_single_mesh":  False,
+        "lod_level":          1,
+        "deep_bays":          False,
+        "detailed_screws":    False,
+        "realistic_ports":    False,
+        "detailed_rear":      False,
+        "subtle_wear":        False,
+        "high_poly_grilles":  False,
+        "proper_bevels":      False,
+        "led_emissive":       False,
+        "detailed_handles":   False,
     },
     "medium": {
-        "eia_holes":         False,  # solid rail flanges
-        "lod_rails":         False,
-        "rack_rails":        True,
-        "fan_tray":          True,
-        "crossbars":         True,
-        "bezel":             True,
-        "server_bays":       True,   # basic flat bays, no deep recesses
-        "bay_3d":            False,
-        "vents":             False,
-        "grille":            False,
-        "ear_screws":        False,
-        "floor_perforated":  False,  # all tiles solid (bake-ready)
-        "floor_single_mesh": False,
-        "lod_level":         2,
+        "eia_holes":          False,  # solid rail flanges
+        "lod_rails":          False,
+        "rack_rails":         True,
+        "fan_tray":           True,
+        "crossbars":          True,
+        "bezel":              True,
+        "server_bays":        True,   # basic flat bays, no deep recesses
+        "bay_3d":             False,
+        "vents":              False,
+        "grille":             False,
+        "ear_screws":         False,
+        "floor_perforated":   False,  # all tiles solid (bake-ready)
+        "floor_single_mesh":  False,
+        "lod_level":          2,
+        "deep_bays":          False,
+        "detailed_screws":    False,
+        "realistic_ports":    False,
+        "detailed_rear":      False,
+        "subtle_wear":        False,
+        "high_poly_grilles":  False,
+        "proper_bevels":      False,
+        "led_emissive":       False,
+        "detailed_handles":   False,
     },
     "low": {
-        "eia_holes":         False,
-        "lod_rails":         False,
-        "rack_rails":        False,  # no mounting rails at all
-        "fan_tray":          False,
-        "crossbars":         False,
-        "bezel":             False,
-        "server_bays":       False,
-        "bay_3d":            False,
-        "vents":             False,
-        "grille":            False,
-        "ear_screws":        False,
-        "floor_perforated":  False,
-        "floor_single_mesh": True,   # single flat slab + grid normal map hint
-        "lod_level":         3,
+        "eia_holes":          False,
+        "lod_rails":          False,
+        "rack_rails":         False,  # no mounting rails at all
+        "fan_tray":           False,
+        "crossbars":          False,
+        "bezel":              False,
+        "server_bays":        False,
+        "bay_3d":             False,
+        "vents":              False,
+        "grille":             False,
+        "ear_screws":         False,
+        "floor_perforated":   False,
+        "floor_single_mesh":  True,   # single flat slab + grid normal map hint
+        "lod_level":          3,
+        "deep_bays":          False,
+        "detailed_screws":    False,
+        "realistic_ports":    False,
+        "detailed_rear":      False,
+        "subtle_wear":        False,
+        "high_poly_grilles":  False,
+        "proper_bevels":      False,
+        "led_emissive":       False,
+        "detailed_handles":   False,
     },
 }
