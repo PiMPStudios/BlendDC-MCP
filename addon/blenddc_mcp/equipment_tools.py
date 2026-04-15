@@ -236,21 +236,21 @@ def create_server_chassis(
 
             # Single recessed background spanning the whole bay zone
             parts.append(_create_box_object(f"{name}_bay_bg",
-                cx=bay_cx, cy=-bg_d / 2, cz=bay_cz,
+                cx=bay_cx, cy=bg_d / 2, cz=bay_cz,
                 w=bay_area_w, d=bg_d, h=bay_area_h, collection=col))
 
             # Vertical separators between columns (fills the gap_x slots)
             for ci in range(1, bay_cols):
                 sx = bay_left + ci * (bay_w + gap_x) - gap_x / 2
                 parts.append(_create_box_object(f"{name}_bay_vsep_{ci}",
-                    cx=sx, cy=-bg_d / 2 - 0.0005, cz=bay_cz,
+                    cx=sx, cy=bg_d / 2, cz=bay_cz,
                     w=gap_x, d=bg_d + 0.001, h=bay_area_h, collection=col))
 
             # Horizontal separator between rows
             if bay_rows == 2:
                 hs_z = bay_area_z0 + bay_h + gap_z / 2
                 parts.append(_create_box_object(f"{name}_bay_hsep",
-                    cx=bay_cx, cy=-bg_d / 2 - 0.0005, cz=hs_z,
+                    cx=bay_cx, cy=bg_d / 2, cz=hs_z,
                     w=bay_area_w, d=bg_d + 0.001, h=gap_z, collection=col))
 
             # Individual carrier face plates + per-row handle strip
@@ -263,10 +263,10 @@ def create_server_chassis(
                     bx = bay_left + (col_i + 0.5) * bay_w + col_i * gap_x
                     bx = _jitter(bx, 0.0005, random_variation)
 
-                    # Carrier face (thin plate proud of background)
+                    # Carrier face (thin plate at face level)
                     parts.append(_create_box_object(f"{name}_carr_{idx:02d}",
-                        cx=bx, cy=-0.0020, cz=rz,
-                        w=bay_w - 0.002, d=0.004, h=bay_h - 0.002, collection=col))
+                        cx=bx, cy=0.0010, cz=rz,
+                        w=bay_w - 0.002, d=0.0020, h=bay_h - 0.002, collection=col))
 
                     if qf["bay_3d"]:
                         # ultra: individual eject handles per bay
@@ -338,9 +338,14 @@ def create_server_chassis(
                     w=0.003, d=0.002, h=0.003, collection=col))
 
             for ui, uz_frac in enumerate((0.20, 0.11)):
-                parts.append(_create_box_object(f"{name}_usb_{ui}",
-                    cx=ctrl_cx, cy=-0.002, cz=h * uz_frac,
-                    w=0.009, d=0.002, h=0.005, collection=col))
+                # Outer frame (at face level)
+                parts.append(_create_box_object(f"{name}_usb_{ui}_frm",
+                    cx=ctrl_cx, cy=-0.0010, cz=h * uz_frac,
+                    w=0.013, d=0.0020, h=0.009, collection=col))
+                # Recessed inner face
+                parts.append(_create_box_object(f"{name}_usb_{ui}_inn",
+                    cx=ctrl_cx, cy=0.0050, cz=h * uz_frac,
+                    w=0.009, d=0.0025, h=0.005, collection=col))
 
             # Service tag pull-tab (far left)
             parts.append(_create_box_object(f"{name}_svc_tag",
@@ -455,14 +460,14 @@ def create_server_chassis(
 
         if qf["server_bays"]:
             parts.append(_create_box_object(f"{name}_exp_bg",
-                cx=EXPAND_CX, cy=-exp_bg_d / 2, cz=BAY_CZ,
+                cx=EXPAND_CX, cy=exp_bg_d / 2, cz=BAY_CZ,
                 w=EXPAND_W - 0.002, d=exp_bg_d, h=BAY_H_DIM, collection=col))
             for i in range(EXP_SLOTS):
                 ez = BAY_CZ - BAY_H_DIM / 2 + (i + 0.5) * exp_slot_h + i * exp_gap
-                # Slot carrier face
+                # Slot carrier face (at face level)
                 parts.append(_create_box_object(f"{name}_exp_face_{i}",
-                    cx=EXPAND_CX, cy=-0.0022, cz=ez,
-                    w=EXPAND_W - 0.006, d=0.005, h=exp_slot_h - 0.002, collection=col))
+                    cx=EXPAND_CX, cy=0.0010, cz=ez,
+                    w=EXPAND_W - 0.006, d=0.0020, h=exp_slot_h - 0.002, collection=col))
                 if qf["bay_3d"]:
                     # Orange pull-tab at top-right of slot
                     parts.append(_create_box_object(f"{name}_exp_tab_{i}",
@@ -490,14 +495,14 @@ def create_server_chassis(
 
             # Single recessed background spanning the full bay zone
             parts.append(_create_box_object(f"{name}_bay_bg",
-                cx=BAY_CX, cy=-bg_d / 2, cz=BAY_CZ,
+                cx=BAY_CX, cy=bg_d / 2, cz=BAY_CZ,
                 w=BAY_ZONE_W, d=bg_d, h=BAY_H_DIM, collection=col))
 
             # Vertical separators between bay slots
             for ci in range(1, actual_bays):
                 sx = BAY_X0 + ci * (bay_w + bay_gap) - bay_gap / 2
                 parts.append(_create_box_object(f"{name}_bay_vsep_{ci}",
-                    cx=sx, cy=-bg_d / 2 - 0.0005, cz=BAY_CZ,
+                    cx=sx, cy=bg_d / 2, cz=BAY_CZ,
                     w=bay_gap, d=bg_d + 0.001, h=BAY_H_DIM, collection=col))
 
             for i in range(actual_bays):
@@ -505,10 +510,10 @@ def create_server_chassis(
                 bx  = _jitter(bx, 0.0008, random_variation)
                 cw  = bay_w - 0.0015
 
-                # Carrier face (proud of background)
+                # Carrier face (at face level)
                 parts.append(_create_box_object(f"{name}_carr_{i:02d}",
-                    cx=bx, cy=-0.0025, cz=BAY_CZ,
-                    w=cw, d=0.005, h=BAY_H_DIM - 0.002, collection=col))
+                    cx=bx, cy=0.0010, cz=BAY_CZ,
+                    w=cw, d=0.0020, h=BAY_H_DIM - 0.002, collection=col))
 
                 # Eject handle at top of carrier
                 hdl_cz = BAY_CZ + BAY_H_DIM / 2 - hdl_h / 2
@@ -666,14 +671,14 @@ def create_server_chassis(
 
             # Single recessed background plate
             parts.append(_create_box_object(f"{name}_bay_bg",
-                cx=BAY_CX_4, cy=-bg_d_4 / 2, cz=BOT_CZ,
+                cx=BAY_CX_4, cy=bg_d_4 / 2, cz=BOT_CZ,
                 w=BAY_W_4, d=bg_d_4, h=BAY_H_DIM_4, collection=col))
 
             # Vertical separators
             for ci in range(1, actual_bays):
                 sx4 = BAY_X0_4 + ci * (bay_w + bay_gap) - bay_gap / 2
                 parts.append(_create_box_object(f"{name}_bay_vsep_{ci}",
-                    cx=sx4, cy=-bg_d_4 / 2 - 0.0005, cz=BOT_CZ,
+                    cx=sx4, cy=bg_d_4 / 2, cz=BOT_CZ,
                     w=bay_gap, d=bg_d_4 + 0.001, h=BAY_H_DIM_4, collection=col))
 
             for i in range(actual_bays):
@@ -681,10 +686,10 @@ def create_server_chassis(
                 bx4 = _jitter(bx4, 0.0008, random_variation)
                 cw4 = bay_w - 0.0015
 
-                # Carrier face
+                # Carrier face (at face level)
                 parts.append(_create_box_object(f"{name}_carr_{i:02d}",
-                    cx=bx4, cy=-0.0025, cz=BOT_CZ,
-                    w=cw4, d=0.005, h=BAY_H_DIM_4 - 0.002, collection=col))
+                    cx=bx4, cy=0.0010, cz=BOT_CZ,
+                    w=cw4, d=0.0020, h=BAY_H_DIM_4 - 0.002, collection=col))
 
                 # Eject handle at BOTTOM of carrier (4U style)
                 hdl_cz4 = BOT_CZ - BAY_H_DIM_4 / 2 + HDL_H_4 / 2
@@ -704,13 +709,13 @@ def create_server_chassis(
             nvme_slot_h = (BAY_H_DIM_4 - 0.003) / 2
             nvme_bg_d   = 0.010 if qf["bay_3d"] else 0.005
             parts.append(_create_box_object(f"{name}_nvme_bg",
-                cx=NVME_CX_4, cy=-nvme_bg_d / 2, cz=BOT_CZ,
+                cx=NVME_CX_4, cy=nvme_bg_d / 2, cz=BOT_CZ,
                 w=NVME_W_4 - 0.002, d=nvme_bg_d, h=BAY_H_DIM_4, collection=col))
             for ni in range(2):
                 nz = BOT_CZ - BAY_H_DIM_4 / 2 + (ni + 0.5) * nvme_slot_h + ni * 0.003
                 parts.append(_create_box_object(f"{name}_nvme_face_{ni}",
-                    cx=NVME_CX_4, cy=-0.0022, cz=nz,
-                    w=NVME_W_4 - 0.006, d=0.005, h=nvme_slot_h - 0.002, collection=col))
+                    cx=NVME_CX_4, cy=0.0010, cz=nz,
+                    w=NVME_W_4 - 0.006, d=0.0020, h=nvme_slot_h - 0.002, collection=col))
                 if qf["bay_3d"]:
                     parts.append(_create_box_object(f"{name}_nvme_tab_{ni}",
                         cx=NVME_CX_4 + NVME_W_4 * 0.30, cy=-nvme_bg_d - 0.003,
@@ -1233,8 +1238,8 @@ def create_network_switch(
         LED_Z       = BLOCK_Z0 + PORT_ZONE_H + h * 0.045 + LED_H / 2
 
         # ── Port zone recessed background plate ───────────────────────────
-        bg_d = 0.0020
-        bg_y = bg_d / 2   # 1 mm behind face
+        bg_d = 0.0100     # 10 mm recess — proper port depth
+        bg_y = bg_d / 2
         parts.append(_create_box_object(f"{name}_port_bg",
             cx=PORT_CX, cy=bg_y, cz=BLOCK_Z0 + PORT_ZONE_H / 2,
             w=PORT_W, d=bg_d, h=PORT_ZONE_H + h * 0.010, collection=col))
@@ -1253,17 +1258,23 @@ def create_network_switch(
                 h=PORT_ZONE_H + h * 0.016, collection=col))
 
         # ── RJ45 port cage faces (2 rows × n_cols) ───────────────────────
-        port_face_d = 0.0042
         for row_i, row_z in enumerate([ROW1_Z, ROW2_Z]):
             for ci in range(n_cols):
                 port_idx = row_i * n_cols + ci
                 if port_idx >= port_count:
                     break
                 px = _jitter(PORT_X0 + ci * col_w + col_w / 2, 0.0001, rv)
+                # Outer bezel frame (at face level, slightly proud)
                 parts.append(_create_box_object(
-                    f"{name}_p_{port_idx:02d}",
-                    cx=px, cy=-port_face_d / 2, cz=row_z,
-                    w=PORT_SLOT_W, d=port_face_d, h=PORT_SLOT_H,
+                    f"{name}_p_{port_idx:02d}_frm",
+                    cx=px, cy=-0.0010, cz=row_z,
+                    w=PORT_SLOT_W + 0.0025, d=0.0020, h=PORT_SLOT_H + 0.0025,
+                    collection=col))
+                # Recessed inner face
+                parts.append(_create_box_object(
+                    f"{name}_p_{port_idx:02d}_inn",
+                    cx=px, cy=0.0080, cz=row_z,
+                    w=PORT_SLOT_W - 0.0020, d=0.0025, h=PORT_SLOT_H - 0.0020,
                     collection=col))
 
         # ── LED indicators ────────────────────────────────────────────────
@@ -1296,14 +1307,19 @@ def create_network_switch(
         SFP_CAGE_W  = (SFP_W - 0.010) / 2   # two columns in SFP_W
         SFP_CAGE_H  = PORT_SLOT_H
         SFP_COL_STP = SFP_CAGE_W + 0.004
-        sfp_face_d  = 0.0050
 
         for row_i, sfp_z in enumerate([ROW1_Z, ROW2_Z]):
             for ci in range(2):
                 sfp_x = SFP_X0 + 0.004 + ci * SFP_COL_STP + SFP_CAGE_W / 2
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}",
-                    cx=sfp_x, cy=-sfp_face_d / 2, cz=sfp_z,
-                    w=SFP_CAGE_W, d=sfp_face_d, h=SFP_CAGE_H,
+                # Outer bezel frame
+                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_frm",
+                    cx=sfp_x, cy=-0.0010, cz=sfp_z,
+                    w=SFP_CAGE_W + 0.002, d=0.0020, h=SFP_CAGE_H + 0.002,
+                    collection=col))
+                # Recessed inner face (SFP is deep — 14 mm)
+                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_inn",
+                    cx=sfp_x, cy=0.0140, cz=sfp_z,
+                    w=SFP_CAGE_W - 0.0020, d=0.0025, h=SFP_CAGE_H - 0.0020,
                     collection=col))
                 # LED dot above each SFP cage
                 if qf["bezel"]:
@@ -1606,6 +1622,12 @@ def create_patch_panel(
         port_h        = port_area_h / rows
         port_cz_base  = h * 0.34
 
+        # Port zone recessed background
+        PP_BG_D = 0.010
+        parts.append(_create_box_object(f"{name}_port_bg",
+            cx=0.0, cy=PP_BG_D / 2, cz=port_cz_base + port_area_h / 2,
+            w=port_area_w + 0.010, d=PP_BG_D, h=port_area_h + 0.010, collection=col))
+
         for row in range(rows):
             for p in range(ports_per_row):
                 idx = row * ports_per_row + p
@@ -1615,9 +1637,14 @@ def create_patch_panel(
                 pz = port_cz_base + row * (port_h + 0.002)
                 px = _jitter(px, 0.0003, rv)
                 pz = _jitter(pz, 0.0003, rv)
-                parts.append(_create_box_object(f"{name}_port_{idx:02d}",
-                    cx=px, cy=-0.002, cz=pz,
-                    w=port_w * 0.68, d=0.004, h=port_h * 0.74, collection=col))
+                # Outer bezel frame
+                parts.append(_create_box_object(f"{name}_port_{idx:02d}_frm",
+                    cx=px, cy=-0.0010, cz=pz,
+                    w=port_w * 0.68 + 0.0025, d=0.0020, h=port_h * 0.74 + 0.0025, collection=col))
+                # Recessed inner face
+                parts.append(_create_box_object(f"{name}_port_{idx:02d}_inn",
+                    cx=px, cy=0.0080, cz=pz,
+                    w=port_w * 0.68 - 0.0020, d=0.0025, h=port_h * 0.74 - 0.0020, collection=col))
                 socket_specs.append((px, pz, idx))
 
         # ── Port group dividers ───────────────────────────────────────────
@@ -1802,46 +1829,51 @@ def create_pdu(
         portrait=False → wider than tall   (1U row layout)
         """
         hw, hh = (0.034, 0.038) if portrait else (0.038, 0.030)
-        hd     = 0.0050
-        # Housing surround
+        hd     = 0.0080   # 8 mm recess depth
+        # Outer bezel surround (slightly proud of face)
         parts.append(_create_box_object(f"{tag}_hsg",
-            cx=cx, cy=fy - hd / 2, cz=cz,
-            w=hw + 0.004, d=hd, h=hh + 0.004, collection=col))
-        # Recessed socket face
+            cx=cx, cy=fy - 0.0010, cz=cz,
+            w=hw + 0.004, d=0.0020, h=hh + 0.004, collection=col))
+        # Recessed socket back face
         parts.append(_create_box_object(f"{tag}_face",
-            cx=cx, cy=fy + 0.0010, cz=cz,
-            w=hw - 0.004, d=0.003, h=hh - 0.004, collection=col))
+            cx=cx, cy=fy + hd, cz=cz,
+            w=hw - 0.004, d=0.0025, h=hh - 0.004, collection=col))
         if qf["bay_3d"]:   # ultra: suggest IEC 3-pin pattern
             gz_off = hh * 0.28 if portrait else 0.0
             parts.append(_create_box_object(f"{tag}_gnd",
-                cx=cx, cy=fy - 0.0005, cz=cz + gz_off,
+                cx=cx, cy=fy + hd * 0.50, cz=cz + gz_off,
                 w=0.005, d=0.003, h=0.010 if portrait else 0.005,
                 collection=col))
             for sx, lbl in [(-1, "L"), (1, "N")]:
                 pz_off = -hh * 0.18 if portrait else 0.0
                 parts.append(_create_box_object(f"{tag}_pin{lbl}",
-                    cx=cx + sx * hw * 0.30, cy=fy - 0.0005, cz=cz + pz_off,
+                    cx=cx + sx * hw * 0.30, cy=fy + hd * 0.50, cz=cz + pz_off,
                     w=0.004, d=0.003, h=0.010 if portrait else 0.005,
                     collection=col))
 
     def _c19(tag, cx, cz, fy):
         """C19 heavy-duty outlet (portrait, 0U only)."""
-        hw, hh, hd = 0.048, 0.044, 0.006
+        hw, hh = 0.048, 0.044
+        hd     = 0.0100   # 10 mm recess
+        # Outer bezel
         parts.append(_create_box_object(f"{tag}_hsg",
-            cx=cx, cy=fy - hd / 2, cz=cz,
-            w=hw + 0.004, d=hd, h=hh + 0.004, collection=col))
+            cx=cx, cy=fy - 0.0010, cz=cz,
+            w=hw + 0.004, d=0.0020, h=hh + 0.004, collection=col))
+        # Recessed back face
         parts.append(_create_box_object(f"{tag}_face",
-            cx=cx, cy=fy + 0.0012, cz=cz,
-            w=hw - 0.004, d=0.003, h=hh - 0.004, collection=col))
+            cx=cx, cy=fy + hd, cz=cz,
+            w=hw - 0.004, d=0.0025, h=hh - 0.004, collection=col))
 
     def _c14(tag, cx, cz, fy):
         """C14 IEC inlet (1U right end)."""
+        # Outer bezel
         parts.append(_create_box_object(f"{tag}_c14_hsg",
-            cx=cx, cy=fy - 0.0035, cz=cz,
-            w=0.034, d=0.005, h=0.022, collection=col))
+            cx=cx, cy=fy - 0.0010, cz=cz,
+            w=0.034, d=0.0020, h=0.022, collection=col))
+        # Recessed back face (8 mm)
         parts.append(_create_box_object(f"{tag}_c14_face",
-            cx=cx, cy=fy + 0.0008, cz=cz,
-            w=0.026, d=0.003, h=0.014, collection=col))
+            cx=cx, cy=fy + 0.0080, cz=cz,
+            w=0.026, d=0.0025, h=0.014, collection=col))
 
     # ═════════════════════════════════════════════════════════════════════
     # 0U VERTICAL STRIP
