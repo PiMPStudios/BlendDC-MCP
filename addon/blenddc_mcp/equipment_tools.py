@@ -134,6 +134,147 @@ def _join_parts(
     return joined
 
 
+# ── Bmesh helpers for photorealistic switch/server geometry ───────────────
+
+def _sw_F(bm: bmesh.types.BMesh, verts: list) -> None:
+    """Add a face to bmesh, silently skip on duplicate."""
+    try: bm.faces.new(verts)
+    except: pass
+
+
+def _sw_box(bm: bmesh.types.BMesh,
+            x0: float, x1: float,
+            y0: float, y1: float,
+            z0: float, z1: float) -> None:
+    """Add a solid box (6 quads) to an existing bmesh."""
+    vs = [
+        bm.verts.new((x0, y0, z0)), bm.verts.new((x1, y0, z0)),
+        bm.verts.new((x1, y1, z0)), bm.verts.new((x0, y1, z0)),
+        bm.verts.new((x0, y0, z1)), bm.verts.new((x1, y0, z1)),
+        bm.verts.new((x1, y1, z1)), bm.verts.new((x0, y1, z1)),
+    ]
+    for f in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+        try: bm.faces.new([vs[i] for i in f])
+        except: pass
+
+
+def _sw_mesh_obj(
+    name: str,
+    bm:   "bmesh.types.BMesh",
+    col:  bpy.types.Collection,
+    mat_name: Optional[str] = None,
+) -> bpy.types.Object:
+    """Create a mesh object from bmesh, add to collection, assign material."""
+    final_name = name
+    suffix = 1
+    while bpy.data.objects.get(final_name):
+        final_name = f"{name}_{suffix:03d}"
+        suffix += 1
+    me = bpy.data.meshes.new(final_name)
+    bm.to_mesh(me); bm.free(); me.update()
+    obj = bpy.data.objects.new(final_name, me)
+    try: col.objects.link(obj)
+    except: pass
+    try: bpy.context.scene.collection.objects.unlink(obj)
+    except: pass
+    if mat_name:
+        mat = bpy.data.materials.get(mat_name)
+        if mat: obj.data.materials.append(mat)
+    return obj
+
+
+def _sw_holey_plate(
+    name: str,
+    py: float,
+    rect_holes: List[Tuple[float, float, float, float]],
+    circ_holes: List[Tuple[float, float, float]],
+    col: bpy.types.Collection,
+    mat_name: str,
+    x_min: float, x_max: float,
+    z_min: float, z_max: float,
+    outward_plus_y: bool = False,
+) -> bpy.types.Object:
+    """Flat plate at Y=py with rectangular/circular holes via grid topology."""
+    EPS = 1e-6
+    xs_s: set = {x_min, x_max}
+    zs_s: set = {z_min, z_max}
+    for x0, x1, z0, z1 in rect_holes:
+        xs_s.update([x0, x1]); zs_s.update([z0, z1])
+    NC = 32
+    for cx, cz, r in circ_holes:
+        for i in range(NC):
+            a = 2 * math.pi * i / NC
+            xs_s.add(cx + r * math.cos(a)); zs_s.add(cz + r * math.sin(a))
+        xs_s.update([cx - r, cx + r]); zs_s.update([cz - r, cz + r])
+    xs = sorted(xs_s); zs = sorted(zs_s)
+    bm_p = bmesh.new()
+    vd: Dict[Tuple[int,int], Any] = {}
+    for i, x in enumerate(xs):
+        for j, z in enumerate(zs):
+            vd[(i, j)] = bm_p.verts.new((x, py, z))
+    bm_p.verts.ensure_lookup_table()
+    def in_hole(i: int, j: int) -> bool:
+        mx = (xs[i] + xs[i+1]) * .5
+        mz = (zs[j] + zs[j+1]) * .5
+        for x0, x1, z0, z1 in rect_holes:
+            if x0 - EPS < mx < x1 + EPS and z0 - EPS < mz < z1 + EPS:
+                return True
+        for cx, cz, r in circ_holes:
+            if (mx - cx)**2 + (mz - cz)**2 < r * r:
+                return True
+        return False
+    for i in range(len(xs) - 1):
+        for j in range(len(zs) - 1):
+            if not in_hole(i, j):
+                v0, v1 = vd[(i, j)], vd[(i+1, j)]
+                v2, v3 = vd[(i+1, j+1)], vd[(i, j+1)]
+                try:
+                    if outward_plus_y: bm_p.faces.new([v0, v3, v2, v1])
+                    else:              bm_p.faces.new([v0, v1, v2, v3])
+                except: pass
+    return _sw_mesh_obj(name, bm_p, col, mat_name)
+
+
+def _sw_ensure_materials() -> None:
+    """Create PBR materials for switch/server photorealistic components."""
+    def _pbr(mat_name: str, color: tuple, metallic: float, roughness: float,
+             emission: tuple = None, strength: float = 1.0) -> None:
+        if bpy.data.materials.get(mat_name): return
+        mat = bpy.data.materials.new(mat_name)
+        mat.use_nodes = True
+        nt = mat.node_tree; nt.nodes.clear()
+        out  = nt.nodes.new('ShaderNodeOutputMaterial')
+        bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        bsdf.inputs['Base Color'].default_value = (*color, 1.0)
+        bsdf.inputs['Metallic'].default_value   = metallic
+        bsdf.inputs['Roughness'].default_value  = roughness
+        if emission:
+            emit = nt.nodes.new('ShaderNodeEmission')
+            emit.inputs['Color'].default_value    = (*emission, 1.0)
+            emit.inputs['Strength'].default_value = strength
+            mix  = nt.nodes.new('ShaderNodeMixShader')
+            mix.inputs['Fac'].default_value = 0.5
+            nt.links.new(bsdf.outputs['BSDF'],    mix.inputs[1])
+            nt.links.new(emit.outputs['Emission'], mix.inputs[2])
+            nt.links.new(mix.outputs['Shader'],    out.inputs['Surface'])
+        else:
+            nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+
+    _pbr('M_Aluminum',    (0.82, 0.82, 0.80), metallic=1.0, roughness=0.12)
+    _pbr('M_BlackMatte',  (0.04, 0.04, 0.04), metallic=0.0, roughness=0.80)
+    _pbr('M_DarkGrayMet', (0.12, 0.12, 0.13), metallic=0.8, roughness=0.30)
+    _pbr('M_PlasticDark', (0.08, 0.10, 0.12), metallic=0.0, roughness=0.60)
+    _pbr('M_Gold',        (1.00, 0.78, 0.28), metallic=1.0, roughness=0.15)
+    _pbr('M_SFPCage',     (0.18, 0.18, 0.19), metallic=0.9, roughness=0.20)
+    _pbr('M_PortVoid',    (0.01, 0.01, 0.01), metallic=0.0, roughness=0.95)
+    _pbr('M_Display',     (0.05, 0.30, 0.70), metallic=0.0, roughness=0.05)
+    _pbr('M_LED_Green',   (0.10, 1.00, 0.10), metallic=0.0, roughness=0.30,
+          emission=(0.10, 1.00, 0.10), strength=8.0)
+    _pbr('M_LED_Amber',   (1.00, 0.55, 0.02), metallic=0.0, roughness=0.30,
+          emission=(1.00, 0.55, 0.02), strength=8.0)
+    _pbr('M_LED_Off',     (0.06, 0.06, 0.06), metallic=0.0, roughness=0.50)
+
+
 # ── Tool 1: create_server_chassis ─────────────────────────────────────────
 
 @mcp.tool()
@@ -1156,629 +1297,728 @@ def create_network_switch(
     collection_name: str = "Equipment",
     random_variation: bool = False,
     quality: str = "high",
+    join_mesh: bool = True,
 ) -> Dict[str, Any]:
     """
-    Create a 1U managed network switch (24-port or 48-port).
+    Create a 1U managed network switch with photorealistic bmesh geometry.
 
-    Front face layout (left → right):
-      Control zone  ~40 mm : status LED column (SYS/POE/LNK/ACT) + mode button
-                             + console RJ45 (hero: hollow + gold pins) + USB-A + power LED
-      Port zone    ~340 mm : 2 rows × 12 cols (24p) or 2 rows × 24 cols (48p)
-                             RJ45 cage faces, group dividers (2 groups of 6 for 24p,
-                             4 groups of 6 for 48p), LED bars/dots per quality tier,
-                             hero: 8-pin gold contact arrays per port
-      [24p only]             hero accent strip (thin chrome bar above port zone),
-                             hero product badge plate between port zone and SFP zone
-      SFP zone      ~56 mm : 4 × SFP+ cages in 2×2 arrangement, 37 mm deep,
-                             hero: 2×10 gold contact grid at cage rear, LED dots
-
-    Rear face: 2 fans (24p) or 4 fans (48p), ring + blade bars centred in width,
-               C14 IEC power inlet with hero-quality 3-contact + 2-screw detail (right),
-               service/stack connector (left).
-
-    Proud-geometry depth illusion: port cage faces project −Y from a recessed
-    background plate; rear fans use ring + bar layering.
+    Builds a complete hollow-shell switch with real RJ45 tunnel geometry,
+    SFP+ cage tubes, swept fan blades, IEC C14 inlet with blade contacts,
+    LCD display, top louvers, and side vents — all in centred coordinates,
+    then translated to equipment-tools convention (origin = front-face-bottom-centre).
 
     name:             base name
     u_size:           rack unit height (1 or 2)
     port_count:       front-face data ports (24 or 48)
     collection_name:  Blender collection
-    random_variation: randomize subtle material and jitter variation per unit
-    quality:          "hero" adds gold pins, SFP contacts, C14 blade contacts, and screws
+    random_variation: when True use random seed for LED states; False = seed(42)
+    quality:          parameter accepted for API compatibility; all tiers get full geometry
+    join_mesh:        when True join all parts into one mesh; False parents them
     """
-    # ── Quality flags ─────────────────────────────────────────────────────
-    qf = QUALITY_TIERS.get(quality, QUALITY_TIERS["high"])
+    import random as _rng
+    if random_variation:
+        _rng.seed(None)
+    else:
+        _rng.seed(42)
 
-    h  = u_size * RACK_U_M        # 44.45 mm for 1U
-    w  = EIA_EQUIPMENT_BODY_M     # 446 mm body
-    d  = 0.280                    # 280 mm depth (typical managed switch)
-    st = RACK_SHEET_THICK_M
+    # ── Chassis dimensions ─────────────────────────────────────────────────
+    h  = u_size * RACK_U_M        # 44.45 mm per U
+    w  = EIA_EQUIPMENT_BODY_M     # 446 mm (EIA body width, not rail span)
+    d  = 0.280                    # 280 mm depth
+    HW = w / 2
+    HH = h / 2
+    FRONT_Y = -d / 2              # -0.140
+    BACK_Y  =  d / 2              #  0.140
 
     col   = _get_or_create_collection(collection_name)
     parts: List[bpy.types.Object] = []
-    rv    = random_variation
 
-    # Shared Y reference — front bezel strips sit just proud of face
-    bz_d = st
-    bz_y = -bz_d / 2
+    # Ensure all switch PBR materials exist
+    _sw_ensure_materials()
 
-    # ── Chassis body — open-front shell ───────────────────────────────────
-    # Remove the front face so all port bezel frames, recessed backgrounds,
-    # and inner dark faces are visible. Same approach used in the reference build.
-    # The front of the switch is fully covered by port/bezel/SFP geometry anyway.
-    _chassis = _create_box_object(f"{name}_chassis",
-        cx=0.0, cy=d / 2, cz=h / 2,
-        w=w, d=d, h=h, collection=col)
-    _bm_c = bmesh.new()
-    _bm_c.from_mesh(_chassis.data)
-    # Front face is at local y ≈ −d/2 (the _create_box_object centres the mesh at the object origin)
-    _front_faces = [f for f in _bm_c.faces if f.calc_center_median().y < -(d / 2 * 0.97)]
-    bmesh.ops.delete(_bm_c, geom=_front_faces, context='FACES_ONLY')
-    _bm_c.to_mesh(_chassis.data)
-    _bm_c.free()
-    _chassis.data.update()
-    parts.append(_chassis)
+    # ── RJ45 port constants ────────────────────────────────────────────────
+    OW, OH  = 0.01600, 0.01180
+    OD      = 0.01600
+    WALL    = 0.00140
+    IW      = OW - 2 * WALL       # 0.01320
+    IH      = OH - 2 * WALL       # 0.00900
+    CHAM    = 0.00048
+    PORT_PROTRUDE = 0.00150
+    PORT_FRONT_Y  = FRONT_Y - PORT_PROTRUDE   # -0.14150
 
-    # ─────────────────────────────────────────────────────────────────────
-    # FRONT FACE
-    # ─────────────────────────────────────────────────────────────────────
-    if qf["bezel"]:
-        # Thin horizontal bezel strips — top and bottom of face
-        parts.append(_create_box_object(f"{name}_bz_top",
-            cx=0.0, cy=bz_y, cz=h - h * 0.09,
-            w=w - 0.004, d=bz_d, h=h * 0.14, collection=col))
-        parts.append(_create_box_object(f"{name}_bz_bot",
-            cx=0.0, cy=bz_y, cz=h * 0.09,
-            w=w - 0.004, d=bz_d, h=h * 0.14, collection=col))
+    GAP_X   = 0.00115
+    GRP_GAP = 0.00460
+    G_SIZE  = 6
+    N_GROUPS = 4 if port_count >= 48 else 2
+    PORT_ZONE_CX = 0.0115
+    single_grp_w  = G_SIZE * OW + (G_SIZE - 1) * GAP_X
+    total_ports_w = N_GROUPS * single_grp_w + (N_GROUPS - 1) * GRP_GAP
+    port_left_edge = PORT_ZONE_CX - total_ports_w / 2
 
-    if qf["server_bays"]:
-        # ── Zone layout (absolute widths, sum = w = 0.446 m) ─────────────
-        is_48p    = port_count >= 48
-        n_cols    = 24 if is_48p else 12
-        n_rows    = 2
+    Z_OFF    = -0.0008
+    P_ROW_GAP = 0.00400
+    Z_UPPER  =  (OH / 2 + P_ROW_GAP / 2) + Z_OFF
+    Z_LOWER  = -(OH / 2 + P_ROW_GAP / 2) + Z_OFF
 
-        CTRL_W    = 0.040    # left control panel
-        ZONE_GAP  = 0.005    # gap ctrl↔ports and ports↔SFP
-        SFP_W     = 0.056    # right SFP zone (2 cols × 2 rows of SFP+)
-        PORT_W    = w - CTRL_W - ZONE_GAP - ZONE_GAP - SFP_W   # ~0.340 m
+    # ── SFP+ cage constants ────────────────────────────────────────────────
+    SFP_OW, SFP_OH = 0.01520, 0.01150
+    SFP_WALL       = 0.00150
+    SFP_IW         = SFP_OW - 2 * SFP_WALL
+    SFP_IH         = SFP_OH - 2 * SFP_WALL
+    SFP_DEPTH      = 0.03700
+    SFP_MOUTH_Y    = PORT_FRONT_Y
+    SFP_BACK_Y     = SFP_MOUTH_Y + SFP_DEPTH
+    SFP_CAGES_DEF  = [
+        (0.1826, 0.1978,  0.0007,  0.0122),
+        (0.2006, 0.2158,  0.0007,  0.0122),
+        (0.1826, 0.1978, -0.0138, -0.0023),
+        (0.2006, 0.2158, -0.0138, -0.0023),
+    ]
 
-        # X origins (body centred at X = 0)
-        CTRL_CX   = -w / 2 + CTRL_W / 2
-        PORT_X0   = -w / 2 + CTRL_W + ZONE_GAP   # left edge of port zone
-        PORT_CX   = PORT_X0 + PORT_W / 2
-        SFP_X0    = PORT_X0 + PORT_W + ZONE_GAP   # left edge of SFP zone
-        SFP_CX    = SFP_X0 + SFP_W / 2
+    # ── Fan constants ──────────────────────────────────────────────────────
+    FAN_SHROUD_R = 0.02175
+    FAN_HOLE_R   = 0.02050
+    FAN1_CX, FAN2_CX = 0.19800, 0.15000
+    FAN_CZ       = 0.00160
+    FAN_DUCT_D   = 0.02800
 
-        col_w     = PORT_W / n_cols
+    # ── IEC C14 constants ──────────────────────────────────────────────────
+    IEC_CX, IEC_CZ   = -0.1880, -0.0028
+    IEC_CUT_W, IEC_CUT_H = 0.0280, 0.0220
+    IEC_FLG_W, IEC_FLG_H = 0.0390, 0.0310
+    IEC_SOCK_D   = 0.0200
+    IEC_FLG_T    = 0.0025
 
-        # Physical RJ45 opening — 24P gets wider ports (more breathing room per column)
-        _slot_cap   = 0.0135 if is_48p else 0.0155   # 13.5 mm (48P) / 15.5 mm (24P)
-        PORT_SLOT_W = min(col_w * 0.72, _slot_cap)
-        PORT_SLOT_H = h * 0.193                    # ≈ 8.6 mm for 1U
-
-        # Vertical block: [port_zone] [small gap] [LED strip]
-        PORT_ZONE_H = PORT_SLOT_H * n_rows + h * 0.075 * (n_rows - 1)
-        LED_H       = h * 0.060
-        BLOCK_H     = PORT_ZONE_H + h * 0.045 + LED_H
-        BLOCK_Z0    = (h - BLOCK_H) / 2
-
-        ROW1_Z      = BLOCK_Z0 + PORT_SLOT_H / 2
-        ROW2_Z      = ROW1_Z + PORT_SLOT_H + h * 0.075
-        LED_Z       = BLOCK_Z0 + PORT_ZONE_H + h * 0.045 + LED_H / 2
-
-        # ── Dark material for port socket interiors ───────────────────────
-        _port_dark = bpy.data.materials.new(f"{name}_port_int")
-        _port_dark.use_nodes = True
-        _pd = _port_dark.node_tree.nodes.get("Principled BSDF")
-        if _pd:
-            _pd.inputs["Base Color"].default_value   = (0.004, 0.004, 0.005, 1.0)
-            _pd.inputs["Roughness"].default_value    = 0.95
-            _pd.inputs["Metallic"].default_value     = 0.0
-
-        # ── Port zone recessed background plate ───────────────────────────
-        bg_d = 0.0100     # 10 mm recess — proper port depth
-        bg_y = bg_d / 2
-        parts.append(_create_box_object(f"{name}_port_bg",
-            cx=PORT_CX, cy=bg_y, cz=BLOCK_Z0 + PORT_ZONE_H / 2,
-            w=PORT_W, d=bg_d, h=PORT_ZONE_H + h * 0.010, collection=col))
-
-        # ── 24P hero: thin chrome accent strip spanning full face width ───
-        # Sits between top bezel and LED strip — Catalyst-style raised bar
-        if not is_48p and qf.get("led_emissive"):
-            _acc_z = LED_Z + LED_H / 2 + 0.002
-            parts.append(_create_box_object(f"{name}_accent_strip",
-                cx=0.0, cy=-0.0020, cz=_acc_z,
-                w=w - 0.006, d=0.0018, h=0.0022, collection=col))
-
-        # ── 24P hero: product badge plate between port zone and SFP zone ──
-        # A proud rectangle on the face, right of ports — own design touch
-        if not is_48p and qf.get("led_emissive"):
-            # Outer badge frame (slightly proud)
-            parts.append(_create_box_object(f"{name}_badge_frm",
-                cx=SFP_X0 - ZONE_GAP / 2, cy=-0.0014, cz=h * 0.64,
-                w=ZONE_GAP * 0.80, d=0.0014, h=h * 0.28, collection=col))
-            # Recessed inner face of badge (dark inset = embossed label look)
-            _badge_inn = _create_box_object(f"{name}_badge_inn",
-                cx=SFP_X0 - ZONE_GAP / 2, cy=0.0010, cz=h * 0.64,
-                w=ZONE_GAP * 0.50, d=0.0012, h=h * 0.18, collection=col)
-            _badge_inn.data.materials.append(_port_dark)
-            parts.append(_badge_inn)
-
-        # ── Port group vertical dividers ──────────────────────────────────
-        # 48P: 4 groups of 6 (3 dividers). 24P: 2 groups of 6 (1 centre divider).
-        group_size = 6
-        n_groups   = n_cols // group_size
-        div_w      = 0.0025
-        div_d      = 0.0035
-        for g in range(1, n_groups):
-            div_x = PORT_X0 + g * group_size * col_w
-            parts.append(_create_box_object(f"{name}_port_div_{g}",
-                cx=div_x, cy=-div_d / 2,
-                cz=BLOCK_Z0 + PORT_ZONE_H / 2,
-                w=div_w, d=div_d,
-                h=PORT_ZONE_H + h * 0.016, collection=col))
-
-        # ── RJ45 port cage faces (2 rows × n_cols) ───────────────────────
-        BZ_RJ   = 0.0016   # bezel strip width (1.6 mm border around opening)
-        BZ_D    = 0.0025   # bezel strip depth (slightly proud of face)
-        BZ_CY   = -0.0012  # bezel strip centre Y (proud of face)
-        INN_CY  = 0.0085   # inner face Y (~8 mm recessed — visible through opening)
-        for row_i, row_z in enumerate([ROW1_Z, ROW2_Z]):
-            for ci in range(n_cols):
-                port_idx = row_i * n_cols + ci
-                if port_idx >= port_count:
-                    break
-                px = _jitter(PORT_X0 + ci * col_w + col_w / 2, 0.0001, rv)
-                ow = PORT_SLOT_W + BZ_RJ * 2   # outer frame width
-                oh = PORT_SLOT_H + BZ_RJ * 2   # outer frame height
-                # 4 bezel border strips — leave centre open to expose inner face
-                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_bt",
-                    cx=px, cy=BZ_CY, cz=row_z + PORT_SLOT_H / 2 + BZ_RJ / 2,
-                    w=ow, d=BZ_D, h=BZ_RJ, collection=col))
-                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_bb",
-                    cx=px, cy=BZ_CY, cz=row_z - PORT_SLOT_H / 2 - BZ_RJ / 2,
-                    w=ow, d=BZ_D, h=BZ_RJ, collection=col))
-                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_bl",
-                    cx=px - PORT_SLOT_W / 2 - BZ_RJ / 2, cy=BZ_CY, cz=row_z,
-                    w=BZ_RJ, d=BZ_D, h=PORT_SLOT_H, collection=col))
-                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_br",
-                    cx=px + PORT_SLOT_W / 2 + BZ_RJ / 2, cy=BZ_CY, cz=row_z,
-                    w=BZ_RJ, d=BZ_D, h=PORT_SLOT_H, collection=col))
-                # Recessed inner face — dark socket interior visible through opening
-                _inn = _create_box_object(
-                    f"{name}_p_{port_idx:02d}_inn",
-                    cx=px, cy=INN_CY, cz=row_z,
-                    w=PORT_SLOT_W - 0.0010, d=0.0030, h=PORT_SLOT_H - 0.0010,
-                    collection=col)
-                _inn.data.materials.append(_port_dark)
-                parts.append(_inn)
-                # Hero: 8 gold spring-contact pins at top of opening
-                if qf.get("led_emissive"):   # led_emissive is hero-only
-                    _rj_gold = bpy.data.materials.get(f"{name}_rj_gold")
-                    if not _rj_gold:
-                        _rj_gold = bpy.data.materials.new(f"{name}_rj_gold")
-                        _rj_gold.use_nodes = True
-                        _rgn = _rj_gold.node_tree.nodes.get("Principled BSDF")
-                        if _rgn:
-                            _rgn.inputs["Base Color"].default_value  = (1.0, 0.78, 0.28, 1.0)
-                            _rgn.inputs["Metallic"].default_value    = 1.0
-                            _rgn.inputs["Roughness"].default_value   = 0.12
-                    n_pins   = 8
-                    pin_zone_w = PORT_SLOT_W - 0.0020
-                    pin_w    = pin_zone_w / n_pins
-                    pin_gap  = 0.0003
-                    pin_h    = PORT_SLOT_H * 0.55   # occupy upper ~55% of opening
-                    pin_z    = row_z + PORT_SLOT_H * 0.12  # centred in upper area
-                    pin_y    = INN_CY - 0.0010     # just proud of the inner face
-                    pin_x0   = px - pin_zone_w / 2
-                    for pi in range(n_pins):
-                        pin_cx = pin_x0 + pi * pin_w + pin_w / 2
-                        _pin = _create_box_object(
-                            f"{name}_p_{port_idx:02d}_pin_{pi}",
-                            cx=pin_cx, cy=pin_y, cz=pin_z,
-                            w=pin_w - pin_gap, d=0.0008, h=pin_h,
-                            collection=col)
-                        _pin.data.materials.append(_rj_gold)
-                        parts.append(_pin)
-
-        # ── LED indicators ────────────────────────────────────────────────
-        led_dot_h = h * 0.028
-        led_y_p   = -0.0030
-
-        if qf["bay_3d"]:
-            # Ultra: two tiny LED dots (link + activity) above every port column
-            led_dot_w = PORT_SLOT_W * 0.22
-            for ci in range(n_cols):
-                px = PORT_X0 + ci * col_w + col_w / 2
-                for x_off, sfx in [(-PORT_SLOT_W * 0.30, "lnk"),
-                                    ( PORT_SLOT_W * 0.30, "act")]:
-                    parts.append(_create_box_object(
-                        f"{name}_led_{ci:02d}_{sfx}",
-                        cx=px + x_off, cy=led_y_p, cz=LED_Z,
-                        w=led_dot_w, d=0.0024, h=led_dot_h,
-                        collection=col))
-        elif qf["bezel"]:
-            # High/medium: one LED bar per port group
-            for g in range(n_groups):
-                bar_x0 = PORT_X0 + g * group_size * col_w
-                bar_cx = bar_x0 + group_size * col_w / 2
-                bar_w  = group_size * col_w - div_w - 0.001
-                parts.append(_create_box_object(f"{name}_led_bar_{g}",
-                    cx=bar_cx, cy=led_y_p, cz=LED_Z,
-                    w=bar_w, d=0.0024, h=led_dot_h, collection=col))
-
-        # ── SFP uplink zone: 2×2 cage array ──────────────────────────────
-        SFP_CAGE_W  = (SFP_W - 0.010) / 2   # two columns in SFP_W
-        SFP_CAGE_H  = PORT_SLOT_H
-        SFP_COL_STP = SFP_CAGE_W + 0.004
-
-        BZ_SFP  = 0.0018   # SFP bezel border width (slightly chunkier than RJ45)
-        for row_i, sfp_z in enumerate([ROW1_Z, ROW2_Z]):
-            for ci in range(2):
-                sfp_x = SFP_X0 + 0.004 + ci * SFP_COL_STP + SFP_CAGE_W / 2
-                sw = SFP_CAGE_W
-                sh = SFP_CAGE_H
-                # 4 bezel border strips — open centre exposes the SFP slot depth
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_bt",
-                    cx=sfp_x, cy=BZ_CY, cz=sfp_z + sh / 2 + BZ_SFP / 2,
-                    w=sw + BZ_SFP * 2, d=BZ_D, h=BZ_SFP, collection=col))
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_bb",
-                    cx=sfp_x, cy=BZ_CY, cz=sfp_z - sh / 2 - BZ_SFP / 2,
-                    w=sw + BZ_SFP * 2, d=BZ_D, h=BZ_SFP, collection=col))
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_bl",
-                    cx=sfp_x - sw / 2 - BZ_SFP / 2, cy=BZ_CY, cz=sfp_z,
-                    w=BZ_SFP, d=BZ_D, h=sh, collection=col))
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_br",
-                    cx=sfp_x + sw / 2 + BZ_SFP / 2, cy=BZ_CY, cz=sfp_z,
-                    w=BZ_SFP, d=BZ_D, h=sh, collection=col))
-                # Recessed inner face — SFP cage is 37 mm deep (real transceiver insertion depth)
-                _sfp_inn = _create_box_object(f"{name}_sfp_{row_i}_{ci}_inn",
-                    cx=sfp_x, cy=0.0370, cz=sfp_z,
-                    w=sw - 0.0010, d=0.0030, h=sh - 0.0010,
-                    collection=col)
-                _sfp_inn.data.materials.append(_port_dark)
-                parts.append(_sfp_inn)
-                # Hero: 2×10 gold contact grid at cage rear (visible through opening)
-                if qf.get("led_emissive"):   # led_emissive is hero-only
-                    _gold_mat = bpy.data.materials.get(f"{name}_sfp_gold")
-                    if not _gold_mat:
-                        _gold_mat = bpy.data.materials.new(f"{name}_sfp_gold")
-                        _gold_mat.use_nodes = True
-                        _gn = _gold_mat.node_tree.nodes.get("Principled BSDF")
-                        if _gn:
-                            _gn.inputs["Base Color"].default_value  = (1.0, 0.78, 0.28, 1.0)
-                            _gn.inputs["Metallic"].default_value    = 1.0
-                            _gn.inputs["Roughness"].default_value   = 0.12
-                    n_con_rows, n_con_cols = 2, 10
-                    con_w = (sw - 0.003) / n_con_cols
-                    con_h = (sh - 0.004) / n_con_rows
-                    con_gap = 0.0004
-                    con_y   = 0.0350   # just in front of inner back face
-                    for cr in range(n_con_rows):
-                        for cc in range(n_con_cols):
-                            cx_c = sfp_x - (sw - 0.003) / 2 + cc * con_w + con_w / 2
-                            cz_c = sfp_z - (sh - 0.004) / 2 + cr * con_h + con_h / 2
-                            _con = _create_box_object(
-                                f"{name}_sfp_{row_i}_{ci}_con_{cr}_{cc}",
-                                cx=cx_c, cy=con_y, cz=cz_c,
-                                w=con_w - con_gap, d=0.0008, h=con_h - con_gap,
-                                collection=col)
-                            _con.data.materials.append(_gold_mat)
-                            parts.append(_con)
-                # LED dot above each SFP cage
-                if qf["bezel"]:
-                    parts.append(_create_box_object(
-                        f"{name}_sfp_led_{row_i}_{ci}",
-                        cx=sfp_x, cy=-0.0026, cz=LED_Z,
-                        w=SFP_CAGE_W * 0.40, d=0.0022, h=led_dot_h,
-                        collection=col))
-
-        # SFP background plate
-        if qf["bezel"]:
-            parts.append(_create_box_object(f"{name}_sfp_bg",
-                cx=SFP_CX, cy=bg_y,
-                cz=BLOCK_Z0 + PORT_ZONE_H / 2,
-                w=SFP_W - 0.002, d=bg_d,
-                h=PORT_ZONE_H + h * 0.010, collection=col))
-
-        # ── Left control zone ─────────────────────────────────────────────
-        if qf["bezel"]:
-            # Mode button — small raised rectangle near top of control zone
-            parts.append(_create_box_object(f"{name}_mode_btn",
-                cx=CTRL_CX - 0.004, cy=-0.0032, cz=h * 0.82,
-                w=0.009, d=0.003, h=0.005, collection=col))
-
-            # Status LED column: SYS / POE / LNK / ACT (stacked, left of console)
-            led_col_x  = CTRL_CX - 0.006
-            led_col_z0 = h * 0.64
-            led_step_z = h * 0.080
-            for li, lbl in enumerate(["sys", "poe", "lnk", "act"]):
-                lz = led_col_z0 - li * led_step_z
-                parts.append(_create_box_object(f"{name}_status_{lbl}",
-                    cx=led_col_x, cy=-0.0032, cz=lz,
-                    w=0.004, d=0.003, h=0.004, collection=col))
-
-            # Console RJ45 — 4-strip open frame (matches data port style)
-            _c_cx = CTRL_CX + 0.002
-            _c_cz = h * 0.50
-            _cw, _ch = 0.012, 0.009
-            _cbz = 0.0016    # border strip width
-            _cbd = 0.0025    # border strip depth
-            _cby = -0.0032   # slightly proud
-            for _strip, _kw, _kh, _ko_x, _ko_z in [
-                ("ct", _cw + _cbz * 2, _cbz, 0.0,          _ch / 2 + _cbz / 2),
-                ("cb", _cw + _cbz * 2, _cbz, 0.0,         -_ch / 2 - _cbz / 2),
-                ("cl", _cbz,           _ch,  -_cw / 2 - _cbz / 2, 0.0),
-                ("cr", _cbz,           _ch,   _cw / 2 + _cbz / 2, 0.0),
-            ]:
-                parts.append(_create_box_object(f"{name}_console_{_strip}",
-                    cx=_c_cx + _ko_x, cy=_cby, cz=_c_cz + _ko_z,
-                    w=_kw, d=_cbd, h=_kh, collection=col))
-            # Dark recessed interior
-            _c_inn = _create_box_object(f"{name}_console_inn",
-                cx=_c_cx, cy=0.0070, cz=_c_cz,
-                w=_cw - 0.0010, d=0.0025, h=_ch - 0.0010, collection=col)
-            _c_inn.data.materials.append(_port_dark)
-            parts.append(_c_inn)
-            # Hero: 8 gold pins
-            if qf.get("led_emissive"):
-                _rj_gold_c = bpy.data.materials.get(f"{name}_rj_gold")
-                if not _rj_gold_c:
-                    _rj_gold_c = bpy.data.materials.new(f"{name}_rj_gold")
-                    _rj_gold_c.use_nodes = True
-                    _rgcn = _rj_gold_c.node_tree.nodes.get("Principled BSDF")
-                    if _rgcn:
-                        _rgcn.inputs["Base Color"].default_value  = (1.0, 0.78, 0.28, 1.0)
-                        _rgcn.inputs["Metallic"].default_value    = 1.0
-                        _rgcn.inputs["Roughness"].default_value   = 0.12
-                _cp_zone_w = _cw - 0.0020
-                _cp_w = _cp_zone_w / 8
-                for _pi in range(8):
-                    _pcx = _c_cx - _cp_zone_w / 2 + _pi * _cp_w + _cp_w / 2
-                    _cp = _create_box_object(f"{name}_console_pin_{_pi}",
-                        cx=_pcx, cy=0.0060, cz=_c_cz + _ch * 0.10,
-                        w=_cp_w - 0.0003, d=0.0008, h=_ch * 0.55, collection=col)
-                    _cp.data.materials.append(_rj_gold_c)
-                    parts.append(_cp)
-
-            # USB-A port
-            parts.append(_create_box_object(f"{name}_usb",
-                cx=CTRL_CX + 0.002, cy=-0.0044, cz=h * 0.33,
-                w=0.010, d=0.004, h=0.007, collection=col))
-
-            # Power LED dot (bottom of control zone)
-            parts.append(_create_box_object(f"{name}_pwr_led",
-                cx=_jitter(CTRL_CX - 0.006, 0.001, rv),
-                cy=-0.0030,
-                cz=_jitter(h * 0.16, 0.001, rv),
-                w=0.004, d=0.003, h=0.004, collection=col))
-
-    else:
-        # Fallback origin for socket placement when server_bays is off
-        SFP_X0 = w * 0.35
+    # ── Rear RJ45 port constants ───────────────────────────────────────────
+    REAR_PORTS = [
+        {'cx': -0.1500, 'cz': -0.0018},
+        {'cx': -0.1260, 'cz': -0.0018},
+    ]
+    REAR_OW, REAR_OH = 0.01600, 0.01180
+    REAR_PROTRUDE    = 0.00150
+    REAR_MOUTH_Y     = BACK_Y + REAR_PROTRUDE
+    REAR_DEEP_Y      = REAR_MOUTH_Y - 0.01600
 
     # ─────────────────────────────────────────────────────────────────────
-    # MOUNTING EARS — always present
+    # CHASSIS: 5-sided open-front shell (back, top, bottom, left, right)
+    # ─────────────────────────────────────────────────────────────────────
+    bm_ch = bmesh.new()
+    def _quad(v0, v1, v2, v3):
+        _sw_F(bm_ch, [bm_ch.verts.new(v0), bm_ch.verts.new(v1),
+                      bm_ch.verts.new(v2), bm_ch.verts.new(v3)])
+    _quad((-HW, BACK_Y, -HH), ( HW, BACK_Y, -HH), ( HW, BACK_Y,  HH), (-HW, BACK_Y,  HH))  # back
+    _quad((-HW, FRONT_Y, HH), ( HW, FRONT_Y,  HH), ( HW, BACK_Y,  HH), (-HW, BACK_Y,  HH))  # top
+    _quad((-HW, FRONT_Y,-HH), (-HW, BACK_Y,  -HH), ( HW, BACK_Y, -HH), ( HW, FRONT_Y, -HH)) # bottom
+    _quad((-HW, FRONT_Y,-HH), (-HW, FRONT_Y,  HH), (-HW, BACK_Y,  HH), (-HW, BACK_Y,  -HH)) # left
+    _quad(( HW, FRONT_Y,-HH), ( HW, BACK_Y,  -HH), ( HW, BACK_Y,  HH), ( HW, FRONT_Y,  HH)) # right
+    parts.append(_sw_mesh_obj(f"{name}_chassis", bm_ch, col, 'M_Aluminum'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # FRONT PLATE: aluminium plate with 48 RJ45 + 4 SFP+ holes
+    # ─────────────────────────────────────────────────────────────────────
+    fp_holes = []
+    for g in range(N_GROUPS):
+        gx = port_left_edge + g * (single_grp_w + GRP_GAP)
+        for p in range(G_SIZE):
+            x0 = gx + p * (OW + GAP_X)
+            x1 = x0 + OW
+            fp_holes += [
+                (x0, x1, Z_UPPER - OH/2, Z_UPPER + OH/2),
+                (x0, x1, Z_LOWER - OH/2, Z_LOWER + OH/2),
+            ]
+    for x0, x1, z0, z1 in SFP_CAGES_DEF:
+        fp_holes.append((x0, x1, z0, z1))
+    parts.append(_sw_holey_plate(
+        f"{name}_front_plate", FRONT_Y,
+        fp_holes, [],
+        col, 'M_Aluminum',
+        x_min=-HW, x_max=HW, z_min=-HH, z_max=HH,
+    ))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # RJ45 PORT HOUSINGS + GOLD CONTACTS
+    # ─────────────────────────────────────────────────────────────────────
+    bm_h = bmesh.new()
+    bm_c = bmesh.new()
+    for g in range(N_GROUPS):
+        gx = port_left_edge + g * (single_grp_w + GRP_GAP)
+        for p in range(G_SIZE):
+            px = gx + p * (OW + GAP_X) + OW / 2
+            for pz in [Z_UPPER, Z_LOWER]:
+                py0 = PORT_FRONT_Y
+                py1 = PORT_FRONT_Y + OD
+                om = [bm_h.verts.new((px - OW/2, py0, pz - OH/2)),
+                      bm_h.verts.new((px + OW/2, py0, pz - OH/2)),
+                      bm_h.verts.new((px + OW/2, py0, pz + OH/2)),
+                      bm_h.verts.new((px - OW/2, py0, pz + OH/2))]
+                im = [bm_h.verts.new((px - IW/2 + CHAM, py0, pz - IH/2 + CHAM)),
+                      bm_h.verts.new((px + IW/2 - CHAM, py0, pz - IH/2 + CHAM)),
+                      bm_h.verts.new((px + IW/2 - CHAM, py0, pz + IH/2 - CHAM)),
+                      bm_h.verts.new((px - IW/2 + CHAM, py0, pz + IH/2 - CHAM))]
+                od = [bm_h.verts.new((px - OW/2, py1, pz - OH/2)),
+                      bm_h.verts.new((px + OW/2, py1, pz - OH/2)),
+                      bm_h.verts.new((px + OW/2, py1, pz + OH/2)),
+                      bm_h.verts.new((px - OW/2, py1, pz + OH/2))]
+                ib = [bm_h.verts.new((px - IW/2, py1 - WALL, pz - IH/2)),
+                      bm_h.verts.new((px + IW/2, py1 - WALL, pz - IH/2)),
+                      bm_h.verts.new((px + IW/2, py1 - WALL, pz + IH/2)),
+                      bm_h.verts.new((px - IW/2, py1 - WALL, pz + IH/2))]
+                # Front frame
+                _sw_F(bm_h, [om[0], om[1], im[1], im[0]])
+                _sw_F(bm_h, [om[2], om[3], im[3], im[2]])
+                _sw_F(bm_h, [om[3], om[0], im[0], im[3]])
+                _sw_F(bm_h, [om[1], om[2], im[2], im[1]])
+                # Outer sides
+                _sw_F(bm_h, [om[0], od[0], od[1], om[1]])
+                _sw_F(bm_h, [om[2], od[2], od[3], om[3]])
+                _sw_F(bm_h, [om[3], od[3], od[2], om[2]])
+                _sw_F(bm_h, [om[3], om[0], od[0], od[3]])
+                _sw_F(bm_h, [om[1], od[1], od[2], om[2]])
+                # Outer back
+                _sw_F(bm_h, [od[0], od[3], od[2], od[1]])
+                # Inner tunnel walls
+                _sw_F(bm_h, [im[0], im[1], ib[1], ib[0]])
+                _sw_F(bm_h, [im[2], im[3], ib[3], ib[2]])
+                _sw_F(bm_h, [im[3], im[0], ib[0], ib[3]])
+                _sw_F(bm_h, [im[1], im[2], ib[2], ib[1]])
+                _sw_F(bm_h, [ib[0], ib[1], ib[2], ib[3]])
+                # 8 gold contact pins
+                N_PINS = 8
+                pin_y0 = py1 - WALL + 0.0002
+                pin_y1 = pin_y0 + 0.0003
+                pin_z0 = pz - IH/2 + 0.001
+                pin_spacing = IW / (N_PINS + 1)
+                for pi in range(N_PINS):
+                    ppx = (px - IW/2) + (pi + 1) * pin_spacing
+                    _sw_box(bm_c, ppx - 0.0003, ppx + 0.0003, pin_y0, pin_y1,
+                            pin_z0, pin_z0 + 0.0011)
+    parts.append(_sw_mesh_obj(f"{name}_port_housings", bm_h, col, 'M_PlasticDark'))
+    bm_c.verts.ensure_lookup_table()
+    n_contacts = N_GROUPS * G_SIZE * 2 * 8
+    for i in range(n_contacts):
+        b = i * 8
+        vs_c = bm_c.verts[b:b+8]
+        for f in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+            try: bm_c.faces.new([vs_c[j] for j in f])
+            except: pass
+    parts.append(_sw_mesh_obj(f"{name}_port_contacts", bm_c, col, 'M_Gold'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # LEDs — per-port above each RJ45
+    # ─────────────────────────────────────────────────────────────────────
+    led_groups: Dict[str, list] = {'M_LED_Green': [], 'M_LED_Amber': [], 'M_LED_Off': []}
+    LED_W, LED_H_dim, LED_D_dim = 0.00230, 0.00220, 0.00100
+    LED_Z_OFFSET = OH / 2 + 0.00250
+    for g in range(N_GROUPS):
+        gx = port_left_edge + g * (single_grp_w + GRP_GAP)
+        for p in range(G_SIZE):
+            px = gx + p * (OW + GAP_X) + OW / 2
+            for pz in [Z_UPPER, Z_LOWER]:
+                lz = pz + LED_Z_OFFSET
+                ly = PORT_FRONT_Y - 0.0002
+                r = _rng.random()
+                mat_l = 'M_LED_Green' if r < 0.55 else 'M_LED_Amber' if r < 0.80 else 'M_LED_Off'
+                led_groups[mat_l].append((px, ly, lz))
+    for mat_name_l, positions in led_groups.items():
+        if not positions:
+            continue
+        bm_l = bmesh.new()
+        for (lx, ly, lz) in positions:
+            _sw_box(bm_l, lx - LED_W/2, lx + LED_W/2,
+                    ly - LED_D_dim, ly,
+                    lz - LED_H_dim/2, lz + LED_H_dim/2)
+        parts.append(_sw_mesh_obj(
+            f"{name}_leds_{mat_name_l.replace('M_LED_', '').lower()}",
+            bm_l, col, mat_name_l))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # SFP+ CAGES: hollow tube shells + connector + contacts + guide rails
+    # ─────────────────────────────────────────────────────────────────────
+    for ci_sfp, (x0, x1, z0, z1) in enumerate(SFP_CAGES_DEF, 1):
+        cx_sfp = (x0 + x1) / 2
+        cz_sfp = (z0 + z1) / 2
+        ix0 = cx_sfp - SFP_IW / 2;  ix1 = cx_sfp + SFP_IW / 2
+        iz0 = cz_sfp - SFP_IH / 2;  iz1 = cz_sfp + SFP_IH / 2
+        bm_sfp = bmesh.new()
+        om_s = [bm_sfp.verts.new((x0, SFP_MOUTH_Y, z0)),
+                bm_sfp.verts.new((x1, SFP_MOUTH_Y, z0)),
+                bm_sfp.verts.new((x1, SFP_MOUTH_Y, z1)),
+                bm_sfp.verts.new((x0, SFP_MOUTH_Y, z1))]
+        im_s = [bm_sfp.verts.new((ix0, SFP_MOUTH_Y, iz0)),
+                bm_sfp.verts.new((ix1, SFP_MOUTH_Y, iz0)),
+                bm_sfp.verts.new((ix1, SFP_MOUTH_Y, iz1)),
+                bm_sfp.verts.new((ix0, SFP_MOUTH_Y, iz1))]
+        ob_s = [bm_sfp.verts.new((x0, SFP_BACK_Y, z0)),
+                bm_sfp.verts.new((x1, SFP_BACK_Y, z0)),
+                bm_sfp.verts.new((x1, SFP_BACK_Y, z1)),
+                bm_sfp.verts.new((x0, SFP_BACK_Y, z1))]
+        ib_s = [bm_sfp.verts.new((ix0, SFP_BACK_Y, iz0)),
+                bm_sfp.verts.new((ix1, SFP_BACK_Y, iz0)),
+                bm_sfp.verts.new((ix1, SFP_BACK_Y, iz1)),
+                bm_sfp.verts.new((ix0, SFP_BACK_Y, iz1))]
+        _sw_F(bm_sfp, [om_s[0], om_s[1], im_s[1], im_s[0]])
+        _sw_F(bm_sfp, [om_s[2], om_s[3], im_s[3], im_s[2]])
+        _sw_F(bm_sfp, [om_s[3], om_s[0], im_s[0], im_s[3]])
+        _sw_F(bm_sfp, [om_s[1], om_s[2], im_s[2], im_s[1]])
+        _sw_F(bm_sfp, [om_s[0], ob_s[0], ob_s[1], om_s[1]])
+        _sw_F(bm_sfp, [om_s[2], ob_s[2], ob_s[3], om_s[3]])
+        _sw_F(bm_sfp, [om_s[3], ob_s[3], ob_s[2], om_s[2]])
+        _sw_F(bm_sfp, [om_s[3], om_s[0], ob_s[0], ob_s[3]])
+        _sw_F(bm_sfp, [om_s[1], ob_s[1], ob_s[2], om_s[2]])
+        _sw_F(bm_sfp, [ob_s[0], ob_s[3], ob_s[2], ob_s[1]])
+        _sw_F(bm_sfp, [im_s[0], im_s[1], ib_s[1], ib_s[0]])
+        _sw_F(bm_sfp, [im_s[2], im_s[3], ib_s[3], ib_s[2]])
+        _sw_F(bm_sfp, [im_s[3], im_s[0], ib_s[0], ib_s[3]])
+        _sw_F(bm_sfp, [im_s[1], im_s[2], ib_s[2], ib_s[1]])
+        _sw_F(bm_sfp, [ib_s[0], ib_s[1], ib_s[2], ib_s[3]])
+        parts.append(_sw_mesh_obj(f"{name}_sfp_cage_{ci_sfp}", bm_sfp, col, 'M_SFPCage'))
+
+    # SFP connector bodies
+    CON_Y0 = SFP_BACK_Y - 0.00150
+    CON_Y1 = SFP_BACK_Y - 0.00030
+    bm_con = bmesh.new()
+    for x0, x1, z0, z1 in SFP_CAGES_DEF:
+        cx_sfp = (x0 + x1) / 2; cz_sfp = (z0 + z1) / 2
+        _sw_box(bm_con, cx_sfp - SFP_IW/2, cx_sfp + SFP_IW/2,
+                CON_Y0, CON_Y1,
+                cz_sfp - SFP_IH/2*0.88, cz_sfp + SFP_IH/2*0.88)
+    parts.append(_sw_mesh_obj(f"{name}_sfp_connectors", bm_con, col, 'M_BlackMatte'))
+
+    # SFP gold contacts
+    PIN_Y0 = SFP_BACK_Y - 0.00200
+    PIN_Y1 = CON_Y0
+    N_SFP_C = 10; CW2 = 0.00080; CH2 = 0.00090; ROW_OFF = 0.00200
+    bm_sfp_pins = bmesh.new()
+    for x0, x1, z0, z1 in SFP_CAGES_DEF:
+        cx_sfp = (x0 + x1) / 2; cz_sfp = (z0 + z1) / 2
+        iw_sfp = (x1 - x0) - 2 * SFP_WALL
+        sp_sfp = iw_sfp / (N_SFP_C + 1)
+        for rz in [cz_sfp + ROW_OFF, cz_sfp - ROW_OFF]:
+            for pi in range(N_SFP_C):
+                ppx = (cx_sfp - iw_sfp/2) + (pi + 1) * sp_sfp
+                _sw_box(bm_sfp_pins, ppx - CW2/2, ppx + CW2/2, PIN_Y0, PIN_Y1,
+                        rz - CH2/2, rz + CH2/2)
+    bm_sfp_pins.verts.ensure_lookup_table()
+    for i in range(len(SFP_CAGES_DEF) * N_SFP_C * 2):
+        b = i * 8
+        vs_sp = bm_sfp_pins.verts[b:b+8]
+        for f in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+            try: bm_sfp_pins.faces.new([vs_sp[j] for j in f])
+            except: pass
+    parts.append(_sw_mesh_obj(f"{name}_sfp_contacts", bm_sfp_pins, col, 'M_Gold'))
+
+    # SFP guide rails
+    RY0_sfp = SFP_MOUTH_Y + SFP_WALL + 0.001
+    RY1_sfp = SFP_BACK_Y  - SFP_WALL - 0.001
+    bm_rails = bmesh.new()
+    for x0, x1, z0, z1 in SFP_CAGES_DEF:
+        cx_sfp = (x0 + x1) / 2
+        for (za, zb) in [(z1 - SFP_WALL - 0.001, z1 - SFP_WALL),
+                         (z0 + SFP_WALL, z0 + SFP_WALL + 0.001)]:
+            _sw_box(bm_rails, cx_sfp - SFP_IW/2, cx_sfp + SFP_IW/2,
+                    RY0_sfp, RY1_sfp, za, zb)
+    parts.append(_sw_mesh_obj(f"{name}_sfp_rails", bm_rails, col, 'M_DarkGrayMet'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # FANS: shroud ring + 7 swept blades + hub cylinder + duct box
+    # ─────────────────────────────────────────────────────────────────────
+    for fi, fcx in enumerate([FAN1_CX, FAN2_CX], 1):
+        suffix = f"_{fi}"
+        N_BLADES = 7
+        bm_fan = bmesh.new()
+        N_RING = 48; SR = FAN_SHROUD_R; ST = 0.0025
+        outer_f_r = []; outer_b_r = []
+        for i in range(N_RING):
+            a = 2 * math.pi * i / N_RING
+            outer_f_r.append(bm_fan.verts.new((fcx + SR*math.cos(a), BACK_Y,        FAN_CZ + SR*math.sin(a))))
+            outer_b_r.append(bm_fan.verts.new((fcx + SR*math.cos(a), BACK_Y - ST*3, FAN_CZ + SR*math.sin(a))))
+        IR = SR - 0.0035
+        inner_f_r = []; inner_b_r = []
+        for i in range(N_RING):
+            a = 2 * math.pi * i / N_RING
+            inner_f_r.append(bm_fan.verts.new((fcx + IR*math.cos(a), BACK_Y,        FAN_CZ + IR*math.sin(a))))
+            inner_b_r.append(bm_fan.verts.new((fcx + IR*math.cos(a), BACK_Y - ST*3, FAN_CZ + IR*math.sin(a))))
+        for i in range(N_RING):
+            n = (i + 1) % N_RING
+            _sw_F(bm_fan, [outer_f_r[i], outer_f_r[n], outer_b_r[n], outer_b_r[i]])
+            _sw_F(bm_fan, [inner_f_r[i], inner_b_r[i], inner_b_r[n], inner_f_r[n]])
+            _sw_F(bm_fan, [outer_f_r[i], inner_f_r[i], inner_f_r[n], outer_f_r[n]])
+            _sw_F(bm_fan, [outer_b_r[i], outer_b_r[n], inner_b_r[n], inner_b_r[i]])
+        parts.append(_sw_mesh_obj(f"{name}_fan_shroud{suffix}", bm_fan, col, 'M_DarkGrayMet'))
+
+        # Blades
+        bm_bl = bmesh.new()
+        BLADE_R_IN = 0.003; BLADE_R_OUT = IR - 0.001; PITCH = 0.008
+        for b_i in range(N_BLADES):
+            angle_base = 2 * math.pi * b_i / N_BLADES
+            angle_tip  = angle_base + 0.45
+            y_in_f  = BACK_Y - 0.003
+            y_out_f = BACK_Y - 0.003 + PITCH
+            y_in_b  = y_in_f  - 0.002
+            y_out_b = y_out_f - 0.002
+            bl_w = 0.0030
+            vs_bl = [
+                bm_bl.verts.new((fcx + BLADE_R_IN*math.cos(angle_base)  - bl_w*math.sin(angle_base),  y_in_f,  FAN_CZ + BLADE_R_IN*math.sin(angle_base)  + bl_w*math.cos(angle_base))),
+                bm_bl.verts.new((fcx + BLADE_R_OUT*math.cos(angle_tip)  - bl_w*math.sin(angle_tip),   y_out_f, FAN_CZ + BLADE_R_OUT*math.sin(angle_tip)  + bl_w*math.cos(angle_tip))),
+                bm_bl.verts.new((fcx + BLADE_R_OUT*math.cos(angle_tip)  + bl_w*math.sin(angle_tip),   y_out_f, FAN_CZ + BLADE_R_OUT*math.sin(angle_tip)  - bl_w*math.cos(angle_tip))),
+                bm_bl.verts.new((fcx + BLADE_R_IN*math.cos(angle_base)  + bl_w*math.sin(angle_base),  y_in_f,  FAN_CZ + BLADE_R_IN*math.sin(angle_base)  - bl_w*math.cos(angle_base))),
+                bm_bl.verts.new((fcx + BLADE_R_IN*math.cos(angle_base)  - bl_w*math.sin(angle_base),  y_in_b,  FAN_CZ + BLADE_R_IN*math.sin(angle_base)  + bl_w*math.cos(angle_base))),
+                bm_bl.verts.new((fcx + BLADE_R_OUT*math.cos(angle_tip)  - bl_w*math.sin(angle_tip),   y_out_b, FAN_CZ + BLADE_R_OUT*math.sin(angle_tip)  + bl_w*math.cos(angle_tip))),
+                bm_bl.verts.new((fcx + BLADE_R_OUT*math.cos(angle_tip)  + bl_w*math.sin(angle_tip),   y_out_b, FAN_CZ + BLADE_R_OUT*math.sin(angle_tip)  - bl_w*math.cos(angle_tip))),
+                bm_bl.verts.new((fcx + BLADE_R_IN*math.cos(angle_base)  + bl_w*math.sin(angle_base),  y_in_b,  FAN_CZ + BLADE_R_IN*math.sin(angle_base)  - bl_w*math.cos(angle_base))),
+            ]
+            for f in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+                try: bm_bl.faces.new([vs_bl[i] for i in f])
+                except: pass
+        parts.append(_sw_mesh_obj(f"{name}_fan_blades{suffix}", bm_bl, col, 'M_BlackMatte'))
+
+        # Hub
+        bm_hub = bmesh.new()
+        HR = 0.0038; HY0 = BACK_Y - 0.003; HY1 = BACK_Y + 0.001
+        hub_f_v = []; hub_b_v = []
+        for i in range(16):
+            a = 2 * math.pi * i / 16
+            hub_f_v.append(bm_hub.verts.new((fcx + HR*math.cos(a), HY0, FAN_CZ + HR*math.sin(a))))
+            hub_b_v.append(bm_hub.verts.new((fcx + HR*math.cos(a), HY1, FAN_CZ + HR*math.sin(a))))
+        cf_v = bm_hub.verts.new((fcx, HY0, FAN_CZ))
+        cb_v = bm_hub.verts.new((fcx, HY1, FAN_CZ))
+        for i in range(16):
+            n = (i + 1) % 16
+            _sw_F(bm_hub, [hub_f_v[i], hub_f_v[n], hub_b_v[n], hub_b_v[i]])
+            try: bm_hub.faces.new([cf_v, hub_f_v[n], hub_f_v[i]])
+            except: pass
+            try: bm_hub.faces.new([cb_v, hub_b_v[i], hub_b_v[n]])
+            except: pass
+        parts.append(_sw_mesh_obj(f"{name}_fan_hub{suffix}", bm_hub, col, 'M_DarkGrayMet'))
+
+        # Duct box
+        bm_duct = bmesh.new()
+        DZ0 = max(FAN_CZ - FAN_SHROUD_R, -HH + 0.001)
+        DZ1 = min(FAN_CZ + FAN_SHROUD_R,  HH - 0.001)
+        DX0 = fcx - FAN_SHROUD_R; DX1 = fcx + FAN_SHROUD_R
+        DY0 = BACK_Y; DY1 = BACK_Y - FAN_DUCT_D
+        oo_d = [bm_duct.verts.new((DX0, DY0, DZ0)), bm_duct.verts.new((DX1, DY0, DZ0)),
+                bm_duct.verts.new((DX1, DY0, DZ1)), bm_duct.verts.new((DX0, DY0, DZ1))]
+        ii_d = [bm_duct.verts.new((DX0, DY1, DZ0)), bm_duct.verts.new((DX1, DY1, DZ0)),
+                bm_duct.verts.new((DX1, DY1, DZ1)), bm_duct.verts.new((DX0, DY1, DZ1))]
+        _sw_F(bm_duct, [ii_d[0], ii_d[1], ii_d[2], ii_d[3]])
+        _sw_F(bm_duct, [oo_d[0], ii_d[0], ii_d[3], oo_d[3]])
+        _sw_F(bm_duct, [oo_d[1], oo_d[2], ii_d[2], ii_d[1]])
+        _sw_F(bm_duct, [oo_d[0], oo_d[1], ii_d[1], ii_d[0]])
+        _sw_F(bm_duct, [oo_d[3], ii_d[3], ii_d[2], oo_d[2]])
+        parts.append(_sw_mesh_obj(f"{name}_fan_duct{suffix}", bm_duct, col, 'M_BlackMatte'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # REAR PLATE with fan holes, console/mgmt RJ45 holes, IEC C14 hole
+    # ─────────────────────────────────────────────────────────────────────
+    rp_rect_holes = []
+    for rp in REAR_PORTS:
+        rp_rect_holes.append((
+            rp['cx'] - REAR_OW/2, rp['cx'] + REAR_OW/2,
+            rp['cz'] - REAR_OH/2, rp['cz'] + REAR_OH/2,
+        ))
+    rp_rect_holes.append((
+        IEC_CX - IEC_CUT_W/2, IEC_CX + IEC_CUT_W/2,
+        IEC_CZ - IEC_CUT_H/2, IEC_CZ + IEC_CUT_H/2,
+    ))
+    rp_circ_holes = [
+        (FAN1_CX, FAN_CZ, FAN_HOLE_R),
+        (FAN2_CX, FAN_CZ, FAN_HOLE_R),
+    ]
+    parts.append(_sw_holey_plate(
+        f"{name}_rear_plate", BACK_Y,
+        rp_rect_holes, rp_circ_holes,
+        col, 'M_Aluminum',
+        x_min=-HW, x_max=HW, z_min=-HH, z_max=HH,
+        outward_plus_y=True,
+    ))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # REAR RJ45 PORTS (Console + Mgmt)
+    # ─────────────────────────────────────────────────────────────────────
+    RWALL  = 0.00140
+    RIW    = REAR_OW - 2 * RWALL
+    RIH    = REAR_OH - 2 * RWALL
+    bm_rh  = bmesh.new()
+    bm_rc  = bmesh.new()
+    for rp in REAR_PORTS:
+        px_r = rp['cx']; pz_r = rp['cz']
+        py_mouth = REAR_MOUTH_Y; py_deep = REAR_DEEP_Y
+        py_iback = py_deep + RWALL
+        om_r = [bm_rh.verts.new((px_r - REAR_OW/2, py_mouth, pz_r - REAR_OH/2)),
+                bm_rh.verts.new((px_r + REAR_OW/2, py_mouth, pz_r - REAR_OH/2)),
+                bm_rh.verts.new((px_r + REAR_OW/2, py_mouth, pz_r + REAR_OH/2)),
+                bm_rh.verts.new((px_r - REAR_OW/2, py_mouth, pz_r + REAR_OH/2))]
+        im_r = [bm_rh.verts.new((px_r - RIW/2 + CHAM, py_mouth, pz_r - RIH/2 + CHAM)),
+                bm_rh.verts.new((px_r + RIW/2 - CHAM, py_mouth, pz_r - RIH/2 + CHAM)),
+                bm_rh.verts.new((px_r + RIW/2 - CHAM, py_mouth, pz_r + RIH/2 - CHAM)),
+                bm_rh.verts.new((px_r - RIW/2 + CHAM, py_mouth, pz_r + RIH/2 - CHAM))]
+        od_r = [bm_rh.verts.new((px_r - REAR_OW/2, py_deep, pz_r - REAR_OH/2)),
+                bm_rh.verts.new((px_r + REAR_OW/2, py_deep, pz_r - REAR_OH/2)),
+                bm_rh.verts.new((px_r + REAR_OW/2, py_deep, pz_r + REAR_OH/2)),
+                bm_rh.verts.new((px_r - REAR_OW/2, py_deep, pz_r + REAR_OH/2))]
+        ib_r = [bm_rh.verts.new((px_r - RIW/2, py_iback, pz_r - RIH/2)),
+                bm_rh.verts.new((px_r + RIW/2, py_iback, pz_r - RIH/2)),
+                bm_rh.verts.new((px_r + RIW/2, py_iback, pz_r + RIH/2)),
+                bm_rh.verts.new((px_r - RIW/2, py_iback, pz_r + RIH/2))]
+        _sw_F(bm_rh, [om_r[0], om_r[1], im_r[1], im_r[0]])
+        _sw_F(bm_rh, [om_r[2], om_r[3], im_r[3], im_r[2]])
+        _sw_F(bm_rh, [om_r[3], om_r[0], im_r[0], im_r[3]])
+        _sw_F(bm_rh, [om_r[1], om_r[2], im_r[2], im_r[1]])
+        _sw_F(bm_rh, [om_r[0], od_r[0], od_r[1], om_r[1]])
+        _sw_F(bm_rh, [om_r[3], od_r[3], od_r[2], om_r[2]])
+        _sw_F(bm_rh, [om_r[3], om_r[0], od_r[0], od_r[3]])
+        _sw_F(bm_rh, [om_r[1], od_r[1], od_r[2], om_r[2]])
+        _sw_F(bm_rh, [od_r[0], od_r[3], od_r[2], od_r[1]])
+        _sw_F(bm_rh, [im_r[0], im_r[1], ib_r[1], ib_r[0]])
+        _sw_F(bm_rh, [im_r[2], im_r[3], ib_r[3], ib_r[2]])
+        _sw_F(bm_rh, [im_r[3], im_r[0], ib_r[0], ib_r[3]])
+        _sw_F(bm_rh, [im_r[1], im_r[2], ib_r[2], ib_r[1]])
+        _sw_F(bm_rh, [ib_r[0], ib_r[1], ib_r[2], ib_r[3]])
+        pin_y0_r = py_iback + 0.0002; pin_y1_r = pin_y0_r + 0.0003
+        pin_z0_r = pz_r - RIH/2 + 0.001
+        sp_r = RIW / 9
+        for pi in range(8):
+            ppx_r = (px_r - RIW/2) + (pi + 1) * sp_r
+            _sw_box(bm_rc, ppx_r - 0.0003, ppx_r + 0.0003,
+                    pin_y0_r, pin_y1_r, pin_z0_r, pin_z0_r + 0.0011)
+    parts.append(_sw_mesh_obj(f"{name}_rear_port_housings", bm_rh, col, 'M_PlasticDark'))
+    bm_rc.verts.ensure_lookup_table()
+    for i in range(len(REAR_PORTS) * 8):
+        b = i * 8
+        vs_rc = bm_rc.verts[b:b+8]
+        for f in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+            try: bm_rc.faces.new([vs_rc[j] for j in f])
+            except: pass
+    parts.append(_sw_mesh_obj(f"{name}_rear_port_contacts", bm_rc, col, 'M_Gold'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # IEC C14 POWER INLET
+    # ─────────────────────────────────────────────────────────────────────
+    CX_i = IEC_CX; CZ_i = IEC_CZ
+    FLG_Y0 = BACK_Y; FLG_Y1 = BACK_Y + IEC_FLG_T
+    SOCK_Y1 = BACK_Y - IEC_SOCK_D
+    S_WALL = 0.002
+    ox0 = CX_i - IEC_FLG_W/2; ox1 = CX_i + IEC_FLG_W/2
+    oz0 = CZ_i - IEC_FLG_H/2; oz1 = CZ_i + IEC_FLG_H/2
+    cx0_i = CX_i - IEC_CUT_W/2; cx1_i = CX_i + IEC_CUT_W/2
+    cz0_i = CZ_i - IEC_CUT_H/2; cz1_i = CZ_i + IEC_CUT_H/2
+    ix0_i = cx0_i + S_WALL; ix1_i = cx1_i - S_WALL
+    iz0_i = cz0_i + S_WALL; iz1_i = cz1_i - S_WALL
+
+    bm_iec = bmesh.new()
+    of_i = [bm_iec.verts.new((ox0, FLG_Y0, oz0)), bm_iec.verts.new((ox1, FLG_Y0, oz0)),
+            bm_iec.verts.new((ox1, FLG_Y0, oz1)), bm_iec.verts.new((ox0, FLG_Y0, oz1))]
+    ob_i = [bm_iec.verts.new((ox0, SOCK_Y1, oz0)), bm_iec.verts.new((ox1, SOCK_Y1, oz0)),
+            bm_iec.verts.new((ox1, SOCK_Y1, oz1)), bm_iec.verts.new((ox0, SOCK_Y1, oz1))]
+    cf_i = [bm_iec.verts.new((cx0_i, FLG_Y0, cz0_i)), bm_iec.verts.new((cx1_i, FLG_Y0, cz0_i)),
+            bm_iec.verts.new((cx1_i, FLG_Y0, cz1_i)), bm_iec.verts.new((cx0_i, FLG_Y0, cz1_i))]
+    it_i = [bm_iec.verts.new((ix0_i, FLG_Y0, iz0_i)), bm_iec.verts.new((ix1_i, FLG_Y0, iz0_i)),
+            bm_iec.verts.new((ix1_i, FLG_Y0, iz1_i)), bm_iec.verts.new((ix0_i, FLG_Y0, iz1_i))]
+    ib_i = [bm_iec.verts.new((ix0_i, SOCK_Y1, iz0_i)), bm_iec.verts.new((ix1_i, SOCK_Y1, iz0_i)),
+            bm_iec.verts.new((ix1_i, SOCK_Y1, iz1_i)), bm_iec.verts.new((ix0_i, SOCK_Y1, iz1_i))]
+    _sw_F(bm_iec, [of_i[0], of_i[1], cf_i[1], cf_i[0]])
+    _sw_F(bm_iec, [of_i[3], cf_i[3], cf_i[2], of_i[2]])
+    _sw_F(bm_iec, [of_i[0], cf_i[0], cf_i[3], of_i[3]])
+    _sw_F(bm_iec, [of_i[1], of_i[2], cf_i[2], cf_i[1]])
+    _sw_F(bm_iec, [of_i[0], ob_i[0], ob_i[1], of_i[1]])
+    _sw_F(bm_iec, [of_i[3], of_i[2], ob_i[2], ob_i[3]])
+    _sw_F(bm_iec, [of_i[0], of_i[3], ob_i[3], ob_i[0]])
+    _sw_F(bm_iec, [of_i[1], ob_i[1], ob_i[2], of_i[2]])
+    _sw_F(bm_iec, [ob_i[0], ob_i[3], ob_i[2], ob_i[1]])
+    _sw_F(bm_iec, [cf_i[0], cf_i[1], it_i[1], it_i[0]])
+    _sw_F(bm_iec, [cf_i[3], it_i[3], it_i[2], cf_i[2]])
+    _sw_F(bm_iec, [cf_i[0], it_i[0], it_i[3], cf_i[3]])
+    _sw_F(bm_iec, [cf_i[1], cf_i[2], it_i[2], it_i[1]])
+    _sw_F(bm_iec, [it_i[0], it_i[1], ib_i[1], ib_i[0]])
+    _sw_F(bm_iec, [it_i[3], ib_i[3], ib_i[2], it_i[2]])
+    _sw_F(bm_iec, [it_i[0], ib_i[0], ib_i[3], it_i[3]])
+    _sw_F(bm_iec, [it_i[1], it_i[2], ib_i[2], ib_i[1]])
+    _sw_F(bm_iec, [ib_i[0], ib_i[1], ib_i[2], ib_i[3]])
+    parts.append(_sw_mesh_obj(f"{name}_iec_body", bm_iec, col, 'M_BlackMatte'))
+
+    # IEC Flange
+    bm_flg = bmesh.new()
+    py0_f = FLG_Y0; py1_f = FLG_Y1
+    f0_v = [bm_flg.verts.new((ox0, py0_f, oz0)), bm_flg.verts.new((ox1, py0_f, oz0)),
+            bm_flg.verts.new((ox1, py0_f, oz1)), bm_flg.verts.new((ox0, py0_f, oz1))]
+    f1_v = [bm_flg.verts.new((ox0, py1_f, oz0)), bm_flg.verts.new((ox1, py1_f, oz0)),
+            bm_flg.verts.new((ox1, py1_f, oz1)), bm_flg.verts.new((ox0, py1_f, oz1))]
+    c0_v = [bm_flg.verts.new((cx0_i, py0_f, cz0_i)), bm_flg.verts.new((cx1_i, py0_f, cz0_i)),
+            bm_flg.verts.new((cx1_i, py0_f, cz1_i)), bm_flg.verts.new((cx0_i, py0_f, cz1_i))]
+    c1_v = [bm_flg.verts.new((cx0_i, py1_f, cz0_i)), bm_flg.verts.new((cx1_i, py1_f, cz0_i)),
+            bm_flg.verts.new((cx1_i, py1_f, cz1_i)), bm_flg.verts.new((cx0_i, py1_f, cz1_i))]
+    _sw_F(bm_flg, [f1_v[0], f1_v[1], c1_v[1], c1_v[0]])
+    _sw_F(bm_flg, [f1_v[3], c1_v[3], c1_v[2], f1_v[2]])
+    _sw_F(bm_flg, [f1_v[0], c1_v[0], c1_v[3], f1_v[3]])
+    _sw_F(bm_flg, [f1_v[1], f1_v[2], c1_v[2], c1_v[1]])
+    _sw_F(bm_flg, [f0_v[0], c0_v[0], c0_v[1], f0_v[1]])
+    _sw_F(bm_flg, [f0_v[3], f0_v[2], c0_v[2], c0_v[3]])
+    _sw_F(bm_flg, [f0_v[0], f0_v[3], c0_v[3], c0_v[0]])
+    _sw_F(bm_flg, [f0_v[1], c0_v[1], c0_v[2], f0_v[2]])
+    for i in range(4):
+        _sw_F(bm_flg, [f0_v[i], f1_v[i], f1_v[(i+1)%4], f0_v[(i+1)%4]])
+    parts.append(_sw_mesh_obj(f"{name}_iec_flange", bm_flg, col, 'M_DarkGrayMet'))
+
+    # IEC Screws
+    bm_scr = bmesh.new()
+    SR_i = 0.002; ST_i = 0.001; NS_i = 12
+    for scx_i in [CX_i - (IEC_CUT_W/2 + (IEC_FLG_W/2 - IEC_CUT_W/2)/2),
+                  CX_i + (IEC_CUT_W/2 + (IEC_FLG_W/2 - IEC_CUT_W/2)/2)]:
+        rim_b_s = []; rim_f_s = []
+        for i in range(NS_i):
+            a = 2 * math.pi * i / NS_i
+            rim_b_s.append(bm_scr.verts.new((scx_i + SR_i*math.cos(a), FLG_Y1,          CZ_i + SR_i*math.sin(a))))
+            rim_f_s.append(bm_scr.verts.new((scx_i + SR_i*math.cos(a), FLG_Y1 + ST_i,   CZ_i + SR_i*math.sin(a))))
+        cf_scr = bm_scr.verts.new((scx_i, FLG_Y1 + ST_i, CZ_i))
+        for i in range(NS_i):
+            _sw_F(bm_scr, [rim_b_s[i], rim_f_s[i], rim_f_s[(i+1)%NS_i], rim_b_s[(i+1)%NS_i]])
+            try: bm_scr.faces.new([cf_scr, rim_f_s[i], rim_f_s[(i+1)%NS_i]])
+            except: pass
+    parts.append(_sw_mesh_obj(f"{name}_iec_screws", bm_scr, col, 'M_DarkGrayMet'))
+
+    # IEC Contacts (Earth/L/N)
+    bm_iec_con = bmesh.new()
+    PY0_iec = SOCK_Y1 + 0.0005; PY1_iec = PY0_iec + 0.001
+    def _blade(cx_b, cz_b, bw, bh):
+        _sw_box(bm_iec_con, cx_b - bw/2, cx_b + bw/2, PY0_iec, PY1_iec,
+                cz_b - bh/2, cz_b + bh/2)
+    _blade(CX_i,         CZ_i + 0.0055, 0.007,  0.005)  # Earth
+    _blade(CX_i + 0.0075, CZ_i - 0.0045, 0.0038, 0.009)  # Live
+    _blade(CX_i - 0.0075, CZ_i - 0.0045, 0.0038, 0.009)  # Neutral
+    parts.append(_sw_mesh_obj(f"{name}_iec_contacts", bm_iec_con, col, 'M_Gold'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # LCD DISPLAY (left of front panel)
+    # ─────────────────────────────────────────────────────────────────────
+    DX0 = -0.2060; DX1 = -0.1480; DZ0 = -0.0120; DZ1 = 0.0140
+    PY_disp = FRONT_Y - 0.0005
+    bm_disp_bz = bmesh.new()
+    _sw_box(bm_disp_bz, DX0 - 0.003, DX1 + 0.003,
+            PY_disp, PY_disp + 0.004,
+            DZ0 - 0.003, DZ1 + 0.003)
+    parts.append(_sw_mesh_obj(f"{name}_display_bezel", bm_disp_bz, col, 'M_BlackMatte'))
+    bm_disp_sc = bmesh.new()
+    _sw_box(bm_disp_sc, DX0, DX1, PY_disp, PY_disp + 0.0015, DZ0, DZ1)
+    parts.append(_sw_mesh_obj(f"{name}_display_screen", bm_disp_sc, col, 'M_Display'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TOP LOUVERS
+    # ─────────────────────────────────────────────────────────────────────
+    LOUVER_W = 0.001; LOUVER_GAP = 0.003; N_LOUVERS = 18
+    for side_off in [0.0, 0.08]:
+        bm_louv = bmesh.new()
+        START_X_L = -0.05
+        for i in range(N_LOUVERS):
+            lx = START_X_L + side_off + i * (LOUVER_W + LOUVER_GAP)
+            _sw_box(bm_louv, lx, lx + LOUVER_W, -0.05, 0.05, HH, HH + 0.012)
+        parts.append(_sw_mesh_obj(f"{name}_top_louvers_{int(side_off*100)}", bm_louv, col, 'M_DarkGrayMet'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # SIDE VENTS
+    # ─────────────────────────────────────────────────────────────────────
+    VENT_W = 0.001; VENT_GAP = 0.0025; N_VENTS = 24; VENT_H_sv = 0.020
+    for x_pos in [HW, -HW]:
+        bm_vent = bmesh.new()
+        start_z_v = -VENT_H_sv * N_VENTS * 0.5 * (VENT_W + VENT_GAP)
+        for i in range(N_VENTS):
+            vz = start_z_v + i * (VENT_W + VENT_GAP)
+            x0_v = x_pos - VENT_W if x_pos > 0 else x_pos
+            x1_v = x_pos           if x_pos > 0 else x_pos + VENT_W
+            _sw_box(bm_vent, x0_v, x1_v, -0.04, 0.04, vz, vz + VENT_H_sv)
+        side_label = 'R' if x_pos > 0 else 'L'
+        parts.append(_sw_mesh_obj(f"{name}_side_vents_{side_label}", bm_vent, col, 'M_DarkGrayMet'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # TRANSLATE all vertices: centred coords → equipment-origin convention
+    # local (0, 0, 0) = front-face-bottom-centre
+    # shift = (0, +d/2, +h/2)
+    # ─────────────────────────────────────────────────────────────────────
+    tx, ty, tz = 0.0, d / 2, h / 2
+    for obj in parts:
+        me = obj.data
+        for v in me.vertices:
+            v.co.x += tx
+            v.co.y += ty
+            v.co.z += tz
+        me.update()
+        obj.hide_render = False
+
+    # ─────────────────────────────────────────────────────────────────────
+    # MOUNTING EARS — always present (built in equipment-origin space)
     # ─────────────────────────────────────────────────────────────────────
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
     ear_d = 0.002
-    ear_h = h * 0.68
+    ear_h_dim = h * 0.68
     for side_sign in (-1, 1):
         side_label = 'L' if side_sign < 0 else 'R'
         ear_cx = side_sign * (w / 2 + ear_w / 2)
-        parts.append(_create_box_object(f"{name}_ear_{side_label}",
-            cx=ear_cx, cy=-ear_d / 2, cz=h / 2,
-            w=ear_w, d=ear_d, h=ear_h, collection=col))
-        if qf["ear_screws"]:
-            parts.append(_create_box_object(f"{name}_ear_slot_{side_label}",
-                cx=ear_cx, cy=-ear_d + 0.001, cz=h * 0.50,
-                w=ear_w * 0.30, d=0.001, h=h * 0.22, collection=col))
-            if qf.get("detailed_screws"):
-                for sfrac in (0.25, 0.50, 0.75):
-                    sy = -ear_d + 0.0018
-                    parts.append(_create_box_object(f"{name}_ear_scr_{side_label}_{int(sfrac*100)}",
-                        cx=ear_cx, cy=sy, cz=h * sfrac,
-                        w=0.006, d=0.002, h=0.006, collection=col))
-                    for dim in ("H", "V"):
-                        parts.append(_create_box_object(
-                            f"{name}_ear_scr_{side_label}_{int(sfrac*100)}_{dim}",
-                            cx=ear_cx, cy=sy - 0.0008, cz=h * sfrac,
-                            w=0.0035 if dim == "H" else 0.0010,
-                            d=0.0008,
-                            h=0.0010 if dim == "H" else 0.0035,
-                            collection=col))
+        # In equipment-origin space: Y=0 is front face, centre is at d/2
+        ear_cy = ear_d / 2  # just proud of front face
+        ear_cz = h / 2
+        bm_ear = bmesh.new()
+        _sw_box(bm_ear,
+                ear_cx - ear_w/2, ear_cx + ear_w/2,
+                -ear_d, 0.0,
+                (h - ear_h_dim)/2, (h + ear_h_dim)/2)
+        parts.append(_sw_mesh_obj(f"{name}_ear_{side_label}", bm_ear, col, 'M_Aluminum'))
 
     # ─────────────────────────────────────────────────────────────────────
-    # SIDE VENTILATION
+    # JOIN or PARENT
     # ─────────────────────────────────────────────────────────────────────
-    if qf["vents"]:
-        vent_count  = 9 if qf.get("high_poly_grilles") else 5
-        vent_h_dim  = max(0.002, h * (0.020 if qf.get("high_poly_grilles") else 0.038))
-        vent_d_len  = d * 0.52
-        vent_cy     = d * 0.32 + vent_d_len / 2
-        vent_z_base = h * 0.20
-        vent_z_span = h * 0.60
-        vent_thick  = 0.0025
-        v_denom     = vent_count - 1
-        for side_sign in (-1, 1):
-            side_label = 'L' if side_sign < 0 else 'R'
-            vx = side_sign * (w / 2 + vent_thick / 2)
-            for i in range(vent_count):
-                vz = _jitter(vent_z_base + i * (vent_z_span / v_denom), 0.001, rv)
-                parts.append(_create_box_object(f"{name}_vent_{side_label}_{i}",
-                    cx=vx, cy=vent_cy, cz=vz,
-                    w=vent_thick, d=vent_d_len, h=vent_h_dim, collection=col))
+    sockets_created: List[bpy.types.Object] = []
 
-    # ─────────────────────────────────────────────────────────────────────
-    # REAR FACE — fan exhausts + C14 inlet + service connector
-    # 48P: 4 fans (higher heat load). 24P: 2 fans (runs cooler).
-    # ─────────────────────────────────────────────────────────────────────
-    if qf["grille"]:
-        FAN_D    = min(0.080, h * 0.80)       # scale to chassis — 1U→35.6 mm, 2U→71 mm
-        FAN_RING = min(0.006, FAN_D * 0.075)  # proportional shroud thickness
-        FAN_GAP  = min(0.010, FAN_D * 0.25)   # proportional gap
-        n_fans   = 4 if (port_count >= 48) else 2
-        fan_total_w = n_fans * FAN_D + (n_fans - 1) * FAN_GAP
-        fan_x0   = -fan_total_w / 2
-        fan_cz   = h / 2
-        rear_y   = d + 0.001
-
-        for fi in range(n_fans):
-            fan_cx = fan_x0 + fi * (FAN_D + FAN_GAP) + FAN_D / 2
-            outer  = FAN_D + FAN_RING * 2
-            # Fan shroud ring
-            parts.append(_create_box_object(f"{name}_fan_ring_{fi}",
-                cx=fan_cx, cy=rear_y, cz=fan_cz,
-                w=outer, d=0.004, h=outer, collection=col))
-            # Fan blade bars (horizontal slots inside ring)
-            if qf["bay_3d"]:
-                n_blades = 9 if qf.get("high_poly_grilles") else 5
-                blade_h  = (FAN_D - 0.006) / (n_blades * 2 - 1)
-                for bi in range(n_blades):
-                    bz = fan_cz - FAN_D / 2 + 0.003 + bi * blade_h * 2 + blade_h / 2
-                    parts.append(_create_box_object(
-                        f"{name}_fan_bl_{fi}_{bi}",
-                        cx=fan_cx, cy=rear_y + 0.0018, cz=bz,
-                        w=FAN_D - 0.010, d=0.0030,
-                        h=blade_h * 0.62, collection=col))
-                if qf.get("high_poly_grilles"):
-                    # hero: fan hub centre stub
-                    parts.append(_create_box_object(f"{name}_fan_hub_{fi}",
-                        cx=fan_cx, cy=rear_y + 0.0025, cz=fan_cz,
-                        w=0.018, d=0.003, h=0.018, collection=col))
-
-        # C14 IEC power inlet — right side
-        c14_cx = w * 0.43
-        parts.append(_create_box_object(f"{name}_c14_body",
-            cx=c14_cx, cy=rear_y, cz=fan_cz,
-            w=0.040, d=0.006, h=0.022, collection=col))
-        # Flange plate (thin aluminium surround, slightly proud of body)
-        parts.append(_create_box_object(f"{name}_c14_face",
-            cx=c14_cx, cy=rear_y + 0.002, cz=fan_cz,
-            w=0.032, d=0.004, h=0.015, collection=col))
-        # Hero: blade contacts (Earth top-centre, L and N lower sides) + mounting screws
-        if qf.get("led_emissive"):
-            _c14_contacts = [
-                ("E",  0.0,      fan_cz + 0.003,  0.007, 0.003),   # Earth: wide flat at top
-                ("L", -0.0055,   fan_cz - 0.0025, 0.003, 0.005),   # Live: left blade
-                ("N",  0.0055,   fan_cz - 0.0025, 0.003, 0.005),   # Neutral: right blade
-            ]
-            _c14_con_mat = bpy.data.materials.new(f"{name}_c14_contact")
-            _c14_con_mat.use_nodes = True
-            _c14cn = _c14_con_mat.node_tree.nodes.get("Principled BSDF")
-            if _c14cn:
-                _c14cn.inputs["Base Color"].default_value = (0.85, 0.85, 0.82, 1.0)
-                _c14cn.inputs["Metallic"].default_value   = 0.95
-                _c14cn.inputs["Roughness"].default_value  = 0.25
-            for _lbl, _xo, _cz_c, _cw_c, _ch_c in _c14_contacts:
-                _cc = _create_box_object(f"{name}_c14_con_{_lbl}",
-                    cx=c14_cx + _xo, cy=rear_y + 0.004, cz=_cz_c,
-                    w=_cw_c, d=0.0020, h=_ch_c, collection=col)
-                _cc.data.materials.append(_c14_con_mat)
-                parts.append(_cc)
-            # 2 flat-head mounting screws (top and bottom of flange)
-            for _suf, _sz_off in [("T", 0.0085), ("B", -0.0085)]:
-                _scr = _create_box_object(f"{name}_c14_scr_{_suf}",
-                    cx=c14_cx, cy=rear_y + 0.0032, cz=fan_cz + _sz_off,
-                    w=0.005, d=0.0025, h=0.005, collection=col)
-                # Crosshead slot H
-                parts.append(_create_box_object(f"{name}_c14_scr_{_suf}_H",
-                    cx=c14_cx, cy=rear_y + 0.0058, cz=fan_cz + _sz_off,
-                    w=0.004, d=0.0008, h=0.001, collection=col))
-                # Crosshead slot V
-                parts.append(_create_box_object(f"{name}_c14_scr_{_suf}_V",
-                    cx=c14_cx, cy=rear_y + 0.0058, cz=fan_cz + _sz_off,
-                    w=0.001, d=0.0008, h=0.004, collection=col))
-                parts.append(_scr)
-
-        # Service / stack connector — left side
-        svc_cx = -w * 0.43
-        parts.append(_create_box_object(f"{name}_svc_port",
-            cx=svc_cx, cy=rear_y, cz=fan_cz,
-            w=0.026, d=0.006, h=0.018, collection=col))
-
-    # ── Join + origin ─────────────────────────────────────────────────────
-    # Reserve slot 0 on the chassis so the port_dark material lands at slot 1
-    # and is not overwritten by the per-switch _var_mat assignment below.
-    _slot0_placeholder = bpy.data.materials.new(f"{name}_s0")
-    parts[0].data.materials.append(_slot0_placeholder)
-    joined = _join_parts(parts, name)
-
-    # ── Per-switch material ────────────────────────────────────────────────
-    _var_mat = bpy.data.materials.new(f"{name}_var")
-    _var_mat.use_nodes = True
-    _var_bsdf = _var_mat.node_tree.nodes.get("Principled BSDF")
-    if _var_bsdf:
-        if random_variation:
-            _base = 0.05 + _random.uniform(-0.015, 0.020)
-            _var_bsdf.inputs["Base Color"].default_value = (
-                max(0.03, _base + _random.uniform(-0.008, 0.008)),
-                max(0.03, _base + _random.uniform(-0.008, 0.008)),
-                max(0.03, _base + _random.uniform(-0.008, 0.015)),
-                1.0,
-            )
-            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.70,
-                0.45 + _random.uniform(-0.10, 0.15)))
-            _var_bsdf.inputs["Metallic"].default_value = max(0.45, min(0.80,
-                0.65 + _random.uniform(-0.10, 0.08)))
-        else:
-            _dirt = _random.uniform(0.0, 0.018)
-            _var_bsdf.inputs["Base Color"].default_value = (
-                max(0.02, 0.050 - _dirt),
-                max(0.02, 0.050 - _dirt),
-                max(0.02, 0.055 - _dirt * 0.5),
-                1.0,
-            )
-            _var_bsdf.inputs["Roughness"].default_value = max(0.30, min(0.55,
-                0.42 + _random.uniform(-0.05, 0.07)))
-            _var_bsdf.inputs["Metallic"].default_value = max(0.53, min(0.78,
-                0.63 + _random.uniform(-0.05, 0.05)))
-    if joined.data.materials:
-        joined.data.materials[0] = _var_mat
+    if join_mesh:
+        joined = _join_parts(parts, name)
+        # Recalculate normals on the joined mesh
+        bpy.ops.object.select_all(action='DESELECT')
+        joined.select_set(True)
+        bpy.context.view_layer.objects.active = joined
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.normals_make_consistent(inside=False)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        _set_origin_to(joined, (0.0, 0.0, 0.0))
     else:
-        joined.data.materials.append(_var_mat)
-
-    # Fill any None slots (from zero-material parts during join) with _var_mat,
-    # and remap their polygon indices to slot 0 so the whole chassis is uniform.
-    for i, mat in enumerate(joined.data.materials):
-        if mat is None:
-            joined.data.materials[i] = _var_mat
-    for poly in joined.data.polygons:
-        slot_mat = joined.data.materials[poly.material_index]
-        if slot_mat is None or slot_mat is _var_mat:
-            poly.material_index = 0
-    joined.data.update()
+        joined = parts[0]
+        for p in parts[1:]:
+            p.parent = joined
+        _set_origin_to(joined, (0.0, 0.0, 0.0))
 
     # ── SOCKET_ empties ────────────────────────────────────────────────────
-    sockets_created: List[str] = []
+    # SFP+ uplink sockets — positions in equipment-origin space
+    SFP_X0_socket = 0.1826  # left edge of SFP zone (from centred coords, shifted +HW ≈ 0.223 + 0 shift)
     for i in range(2):
-        ux = SFP_X0 + i * 0.020
+        ux = SFP_X0_socket + i * 0.020
         up = _add_socket_empty(
             f"{name}_Uplink_{i:02d}",
             location=(ux, 0.0, h * 0.50),
             parent=joined, collection=col,
         )
-        sockets_created.append(up.name)
+        up.visible_camera = False
+        sockets_created.append(up)
 
+    # Power socket at rear
     pwr = _add_socket_empty(
         f"{name}_Power",
-        location=(w * 0.43, d, h * 0.50),
+        location=(IEC_CX, d, h * 0.50),
         parent=joined, collection=col,
     )
-    sockets_created.append(pwr.name)
+    pwr.visible_camera = False
+    sockets_created.append(pwr)
 
-    joined["equipment_type"]   = "switch"
-    joined["u_size"]           = u_size
-    joined["port_count"]       = port_count
-    joined["random_variation"] = random_variation
-    joined["quality"]          = quality
+    joined["equipment_type"] = "switch"
+    joined["u_size"]         = u_size
+    joined["port_count"]     = port_count
+    joined["quality"]        = quality
 
     return {
         "object":      name,
         "collection":  collection_name,
         "u_size":      u_size,
         "port_count":  port_count,
-        "sockets":     sockets_created,
+        "parts":       len(parts),
+        "sockets":     [s.name for s in sockets_created],
         "origin":      "front-face-bottom-centre (0, 0, 0)",
     }
 
