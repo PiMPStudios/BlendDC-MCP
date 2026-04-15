@@ -182,12 +182,21 @@ def create_server_chassis(
     col   = _get_or_create_collection(collection_name)
     parts: List[bpy.types.Object] = []
 
-    # ── Chassis body ───────────────────────────────────────────────────────
+    # ── Chassis body — open-front shell ───────────────────────────────────
+    # Remove front face so drive bay recesses, bezel frames, and control
+    # panel elements are all visible rather than hidden behind solid front.
     chassis = _create_box_object(
         f"{name}_chassis",
         cx=0.0, cy=d / 2, cz=h / 2,
         w=w, d=d, h=h, collection=col,
     )
+    _bm_srv = bmesh.new()
+    _bm_srv.from_mesh(chassis.data)
+    _srv_ff = [f for f in _bm_srv.faces if f.calc_center_median().y < -(d / 2 * 0.97)]
+    bmesh.ops.delete(_bm_srv, geom=_srv_ff, context='FACES_ONLY')
+    _bm_srv.to_mesh(chassis.data)
+    _bm_srv.free()
+    chassis.data.update()
     parts.append(chassis)
 
     actual_bays = 0
@@ -1193,10 +1202,22 @@ def create_network_switch(
     bz_d = st
     bz_y = -bz_d / 2
 
-    # ── Chassis body ──────────────────────────────────────────────────────
-    parts.append(_create_box_object(f"{name}_chassis",
+    # ── Chassis body — open-front shell ───────────────────────────────────
+    # Remove the front face so all port bezel frames, recessed backgrounds,
+    # and inner dark faces are visible. Same approach used in the reference build.
+    # The front of the switch is fully covered by port/bezel/SFP geometry anyway.
+    _chassis = _create_box_object(f"{name}_chassis",
         cx=0.0, cy=d / 2, cz=h / 2,
-        w=w, d=d, h=h, collection=col))
+        w=w, d=d, h=h, collection=col)
+    _bm_c = bmesh.new()
+    _bm_c.from_mesh(_chassis.data)
+    # Front face is at local y ≈ −d/2 (the _create_box_object centres the mesh at the object origin)
+    _front_faces = [f for f in _bm_c.faces if f.calc_center_median().y < -(d / 2 * 0.97)]
+    bmesh.ops.delete(_bm_c, geom=_front_faces, context='FACES_ONLY')
+    _bm_c.to_mesh(_chassis.data)
+    _bm_c.free()
+    _chassis.data.update()
+    parts.append(_chassis)
 
     # ─────────────────────────────────────────────────────────────────────
     # FRONT FACE
