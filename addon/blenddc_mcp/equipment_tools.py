@@ -1237,6 +1237,15 @@ def create_network_switch(
         ROW2_Z      = ROW1_Z + PORT_SLOT_H + h * 0.075
         LED_Z       = BLOCK_Z0 + PORT_ZONE_H + h * 0.045 + LED_H / 2
 
+        # ── Dark material for port socket interiors ───────────────────────
+        _port_dark = bpy.data.materials.new(f"{name}_port_int")
+        _port_dark.use_nodes = True
+        _pd = _port_dark.node_tree.nodes.get("Principled BSDF")
+        if _pd:
+            _pd.inputs["Base Color"].default_value   = (0.004, 0.004, 0.005, 1.0)
+            _pd.inputs["Roughness"].default_value    = 0.95
+            _pd.inputs["Metallic"].default_value     = 0.0
+
         # ── Port zone recessed background plate ───────────────────────────
         bg_d = 0.0100     # 10 mm recess — proper port depth
         bg_y = bg_d / 2
@@ -1258,24 +1267,39 @@ def create_network_switch(
                 h=PORT_ZONE_H + h * 0.016, collection=col))
 
         # ── RJ45 port cage faces (2 rows × n_cols) ───────────────────────
+        BZ_RJ   = 0.0016   # bezel strip width (1.6 mm border around opening)
+        BZ_D    = 0.0025   # bezel strip depth (slightly proud of face)
+        BZ_CY   = -0.0012  # bezel strip centre Y (proud of face)
+        INN_CY  = 0.0085   # inner face Y (~8 mm recessed — visible through opening)
         for row_i, row_z in enumerate([ROW1_Z, ROW2_Z]):
             for ci in range(n_cols):
                 port_idx = row_i * n_cols + ci
                 if port_idx >= port_count:
                     break
                 px = _jitter(PORT_X0 + ci * col_w + col_w / 2, 0.0001, rv)
-                # Outer bezel frame (at face level, slightly proud)
-                parts.append(_create_box_object(
-                    f"{name}_p_{port_idx:02d}_frm",
-                    cx=px, cy=-0.0010, cz=row_z,
-                    w=PORT_SLOT_W + 0.0025, d=0.0020, h=PORT_SLOT_H + 0.0025,
-                    collection=col))
-                # Recessed inner face
-                parts.append(_create_box_object(
+                ow = PORT_SLOT_W + BZ_RJ * 2   # outer frame width
+                oh = PORT_SLOT_H + BZ_RJ * 2   # outer frame height
+                # 4 bezel border strips — leave centre open to expose inner face
+                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_bt",
+                    cx=px, cy=BZ_CY, cz=row_z + PORT_SLOT_H / 2 + BZ_RJ / 2,
+                    w=ow, d=BZ_D, h=BZ_RJ, collection=col))
+                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_bb",
+                    cx=px, cy=BZ_CY, cz=row_z - PORT_SLOT_H / 2 - BZ_RJ / 2,
+                    w=ow, d=BZ_D, h=BZ_RJ, collection=col))
+                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_bl",
+                    cx=px - PORT_SLOT_W / 2 - BZ_RJ / 2, cy=BZ_CY, cz=row_z,
+                    w=BZ_RJ, d=BZ_D, h=PORT_SLOT_H, collection=col))
+                parts.append(_create_box_object(f"{name}_p_{port_idx:02d}_br",
+                    cx=px + PORT_SLOT_W / 2 + BZ_RJ / 2, cy=BZ_CY, cz=row_z,
+                    w=BZ_RJ, d=BZ_D, h=PORT_SLOT_H, collection=col))
+                # Recessed inner face — dark socket interior visible through opening
+                _inn = _create_box_object(
                     f"{name}_p_{port_idx:02d}_inn",
-                    cx=px, cy=0.0080, cz=row_z,
-                    w=PORT_SLOT_W - 0.0020, d=0.0025, h=PORT_SLOT_H - 0.0020,
-                    collection=col))
+                    cx=px, cy=INN_CY, cz=row_z,
+                    w=PORT_SLOT_W - 0.0010, d=0.0030, h=PORT_SLOT_H - 0.0010,
+                    collection=col)
+                _inn.data.materials.append(_port_dark)
+                parts.append(_inn)
 
         # ── LED indicators ────────────────────────────────────────────────
         led_dot_h = h * 0.028
@@ -1308,19 +1332,32 @@ def create_network_switch(
         SFP_CAGE_H  = PORT_SLOT_H
         SFP_COL_STP = SFP_CAGE_W + 0.004
 
+        BZ_SFP  = 0.0018   # SFP bezel border width (slightly chunkier than RJ45)
         for row_i, sfp_z in enumerate([ROW1_Z, ROW2_Z]):
             for ci in range(2):
                 sfp_x = SFP_X0 + 0.004 + ci * SFP_COL_STP + SFP_CAGE_W / 2
-                # Outer bezel frame
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_frm",
-                    cx=sfp_x, cy=-0.0010, cz=sfp_z,
-                    w=SFP_CAGE_W + 0.002, d=0.0020, h=SFP_CAGE_H + 0.002,
-                    collection=col))
-                # Recessed inner face (SFP is deep — 14 mm)
-                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_inn",
+                sw = SFP_CAGE_W
+                sh = SFP_CAGE_H
+                # 4 bezel border strips — open centre exposes the SFP slot depth
+                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_bt",
+                    cx=sfp_x, cy=BZ_CY, cz=sfp_z + sh / 2 + BZ_SFP / 2,
+                    w=sw + BZ_SFP * 2, d=BZ_D, h=BZ_SFP, collection=col))
+                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_bb",
+                    cx=sfp_x, cy=BZ_CY, cz=sfp_z - sh / 2 - BZ_SFP / 2,
+                    w=sw + BZ_SFP * 2, d=BZ_D, h=BZ_SFP, collection=col))
+                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_bl",
+                    cx=sfp_x - sw / 2 - BZ_SFP / 2, cy=BZ_CY, cz=sfp_z,
+                    w=BZ_SFP, d=BZ_D, h=sh, collection=col))
+                parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_br",
+                    cx=sfp_x + sw / 2 + BZ_SFP / 2, cy=BZ_CY, cz=sfp_z,
+                    w=BZ_SFP, d=BZ_D, h=sh, collection=col))
+                # Recessed inner face — SFP cage is deep (14 mm), dark interior
+                _sfp_inn = _create_box_object(f"{name}_sfp_{row_i}_{ci}_inn",
                     cx=sfp_x, cy=0.0140, cz=sfp_z,
-                    w=SFP_CAGE_W - 0.0020, d=0.0025, h=SFP_CAGE_H - 0.0020,
-                    collection=col))
+                    w=sw - 0.0010, d=0.0030, h=sh - 0.0010,
+                    collection=col)
+                _sfp_inn.data.materials.append(_port_dark)
+                parts.append(_sfp_inn)
                 # LED dot above each SFP cage
                 if qf["bezel"]:
                     parts.append(_create_box_object(
@@ -1431,9 +1468,9 @@ def create_network_switch(
     # REAR FACE — 4 × 80 mm fan exhausts + C14 inlet + service connector
     # ─────────────────────────────────────────────────────────────────────
     if qf["grille"]:
-        FAN_D    = 0.080    # 80 mm fan
-        FAN_RING = 0.006    # shroud ring thickness
-        FAN_GAP  = 0.010    # gap between adjacent fan rings
+        FAN_D    = min(0.080, h * 0.80)       # scale to chassis — 1U→35.6 mm, 2U→71 mm
+        FAN_RING = min(0.006, FAN_D * 0.075)  # proportional shroud thickness
+        FAN_GAP  = min(0.010, FAN_D * 0.25)   # proportional gap
         n_fans   = 4
         fan_total_w = n_fans * FAN_D + (n_fans - 1) * FAN_GAP
         fan_x0   = -fan_total_w / 2
@@ -1480,6 +1517,10 @@ def create_network_switch(
             w=0.026, d=0.006, h=0.018, collection=col))
 
     # ── Join + origin ─────────────────────────────────────────────────────
+    # Reserve slot 0 on the chassis so the port_dark material lands at slot 1
+    # and is not overwritten by the per-switch _var_mat assignment below.
+    _slot0_placeholder = bpy.data.materials.new(f"{name}_s0")
+    parts[0].data.materials.append(_slot0_placeholder)
     joined = _join_parts(parts, name)
 
     # ── Per-switch material ────────────────────────────────────────────────
@@ -1515,6 +1556,17 @@ def create_network_switch(
         joined.data.materials[0] = _var_mat
     else:
         joined.data.materials.append(_var_mat)
+
+    # Fill any None slots (from zero-material parts during join) with _var_mat,
+    # and remap their polygon indices to slot 0 so the whole chassis is uniform.
+    for i, mat in enumerate(joined.data.materials):
+        if mat is None:
+            joined.data.materials[i] = _var_mat
+    for poly in joined.data.polygons:
+        slot_mat = joined.data.materials[poly.material_index]
+        if slot_mat is None or slot_mat is _var_mat:
+            poly.material_index = 0
+    joined.data.update()
 
     # ── SOCKET_ empties ────────────────────────────────────────────────────
     sockets_created: List[str] = []
