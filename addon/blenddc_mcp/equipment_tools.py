@@ -1487,9 +1487,9 @@ def create_network_switch(
                 _sw_F(bm_h, [im[3], im[0], ib[0], ib[3]])
                 _sw_F(bm_h, [im[1], im[2], ib[2], ib[1]])
                 _sw_F(bm_h, [ib[0], ib[1], ib[2], ib[3]])
-                # 8 gold contact pins
+                # 8 gold contact pins — inside cavity, in front of ib face
                 N_PINS = 8
-                pin_y0 = py1 - WALL + 0.0002
+                pin_y0 = py1 - WALL - 0.0012   # 1.2mm inside cavity
                 pin_y1 = pin_y0 + 0.0003
                 pin_z0 = pz - IH/2 + 0.001
                 pin_spacing = IW / (N_PINS + 1)
