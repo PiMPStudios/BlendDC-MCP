@@ -1663,7 +1663,7 @@ def create_network_switch(
             _sw_F(bm_fan, [inner_f_r[i], inner_b_r[i], inner_b_r[n], inner_f_r[n]])
             _sw_F(bm_fan, [outer_f_r[i], inner_f_r[i], inner_f_r[n], outer_f_r[n]])
             _sw_F(bm_fan, [outer_b_r[i], outer_b_r[n], inner_b_r[n], inner_b_r[i]])
-        parts.append(_sw_mesh_obj(f"{name}_fan_shroud{suffix}", bm_fan, col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_fan_shroud{suffix}", bm_fan, col, 'M_Black'))
 
         # Blades
         bm_bl = bmesh.new()
@@ -1689,7 +1689,7 @@ def create_network_switch(
             for f in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
                 try: bm_bl.faces.new([vs_bl[i] for i in f])
                 except: pass
-        parts.append(_sw_mesh_obj(f"{name}_fan_blades{suffix}", bm_bl, col, 'M_BlackMatte'))
+        parts.append(_sw_mesh_obj(f"{name}_fan_blades{suffix}", bm_bl, col, 'M_DarkGrayMet'))
 
         # Hub
         bm_hub = bmesh.new()
@@ -1922,13 +1922,15 @@ def create_network_switch(
     parts.append(_sw_mesh_obj(f"{name}_display_screen", bm_disp_sc, col, 'M_Display'))
 
     # Status indicator LEDs (SYS / PWR / POE / ALT) — 4 small squares right of display
+    # Status LEDs at X≈-0.210 (far-left front panel, near logo area per manifest)
     SLED_Y = FRONT_Y - 0.0003
-    SLED_W = 0.0030; SLED_H = 0.0030; SLED_D = 0.0008
+    SLED_W = 0.0023; SLED_H = 0.0016; SLED_D = 0.0008
+    SLED_X = -0.2100
     sled_defs = [
-        ('sys', DX1 + 0.0060, 0.0080, 'M_LED_White'),
-        ('pwr', DX1 + 0.0060, 0.0040, 'M_LED_Green'),
-        ('poe', DX1 + 0.0060, 0.0000, 'M_LED_Amber'),
-        ('alt', DX1 + 0.0060, -0.0040, 'M_LED_Off'),
+        ('pwr', SLED_X,  0.0121, 'M_LED_Green'),
+        ('sys', SLED_X,  0.0046, 'M_LED_White'),
+        ('alt', SLED_X, -0.0029, 'M_LED_Off'),
+        ('poe', SLED_X, -0.0104, 'M_LED_Amber'),
     ]
     for sled_label, sx, sz, smat in sled_defs:
         bm_sl = bmesh.new()
@@ -1949,17 +1951,20 @@ def create_network_switch(
     parts.append(_sw_mesh_obj(f"{name}_top_louvers", bm_louv, col, 'M_DarkGrayMet'))
 
     # ─────────────────────────────────────────────────────────────────────
-    # SIDE VENTS
+    # SIDE VENTS — thin horizontal slits on chassis side walls
+    # Each slit: 1 mm tall in Z, runs Y depth, stacked and centred on mid-height
     # ─────────────────────────────────────────────────────────────────────
-    VENT_W = 0.001; VENT_GAP = 0.0025; N_VENTS = 24; VENT_H_sv = 0.020
+    VENT_SLOT_H = 0.0010; VENT_SLOT_GAP = 0.0020; N_VENTS = 10
+    VENT_Y0 = -0.040; VENT_Y1 = 0.040
+    total_vent_span = N_VENTS * VENT_SLOT_H + (N_VENTS - 1) * VENT_SLOT_GAP
+    start_z_v = -total_vent_span / 2  # centred on Z=0
     for x_pos in [HW, -HW]:
         bm_vent = bmesh.new()
-        start_z_v = -VENT_H_sv * N_VENTS * 0.5 * (VENT_W + VENT_GAP)
         for i in range(N_VENTS):
-            vz = start_z_v + i * (VENT_W + VENT_GAP)
-            x0_v = x_pos - VENT_W if x_pos > 0 else x_pos
-            x1_v = x_pos           if x_pos > 0 else x_pos + VENT_W
-            _sw_box(bm_vent, x0_v, x1_v, -0.04, 0.04, vz, vz + VENT_H_sv)
+            vz = start_z_v + i * (VENT_SLOT_H + VENT_SLOT_GAP)
+            x0_v = x_pos - 0.001 if x_pos > 0 else x_pos
+            x1_v = x_pos          if x_pos > 0 else x_pos + 0.001
+            _sw_box(bm_vent, x0_v, x1_v, VENT_Y0, VENT_Y1, vz, vz + VENT_SLOT_H)
         side_label = 'R' if x_pos > 0 else 'L'
         parts.append(_sw_mesh_obj(f"{name}_side_vents_{side_label}", bm_vent, col, 'M_Black'))
 
