@@ -276,6 +276,7 @@ def _sw_ensure_materials() -> None:
     _pbr('M_LED_Off',     (0.040, 0.070, 0.040), metallic=0.0, roughness=0.55)
     _pbr('M_LED_White',   (0.90, 0.90, 0.90), metallic=0.0, roughness=0.20,
           emission=(0.90, 0.90, 0.90), strength=3.0)
+    _pbr('M_White',       (0.90, 0.90, 0.90), metallic=0.0, roughness=0.50)
 
 
 # ── Tool 1: create_server_chassis ─────────────────────────────────────────
@@ -1383,8 +1384,9 @@ def create_network_switch(
     FAN_SHROUD_R = 0.02175
     FAN_HOLE_R   = 0.02050
     FAN1_CX, FAN2_CX = 0.19800, 0.15000
-    FAN_CZ       = 0.00160
+    FAN_CZ       = -0.00040              # shifted 2mm down to clear chassis top
     FAN_DUCT_D   = 0.02800
+    FAN_BACK_Y   = BACK_Y + 0.002        # 2mm proud of back plate
 
     # ── IEC C14 constants ──────────────────────────────────────────────────
     IEC_CX, IEC_CZ   = -0.1880, -0.0028
@@ -1410,12 +1412,35 @@ def create_network_switch(
     def _quad(v0, v1, v2, v3):
         _sw_F(bm_ch, [bm_ch.verts.new(v0), bm_ch.verts.new(v1),
                       bm_ch.verts.new(v2), bm_ch.verts.new(v3)])
-    _quad((-HW, BACK_Y, -HH), ( HW, BACK_Y, -HH), ( HW, BACK_Y,  HH), (-HW, BACK_Y,  HH))  # back
     _quad((-HW, FRONT_Y, HH), ( HW, FRONT_Y,  HH), ( HW, BACK_Y,  HH), (-HW, BACK_Y,  HH))  # top
     _quad((-HW, FRONT_Y,-HH), (-HW, BACK_Y,  -HH), ( HW, BACK_Y, -HH), ( HW, FRONT_Y, -HH)) # bottom
     _quad((-HW, FRONT_Y,-HH), (-HW, FRONT_Y,  HH), (-HW, BACK_Y,  HH), (-HW, BACK_Y,  -HH)) # left
     _quad(( HW, FRONT_Y,-HH), ( HW, BACK_Y,  -HH), ( HW, BACK_Y,  HH), ( HW, FRONT_Y,  HH)) # right
     parts.append(_sw_mesh_obj(f"{name}_chassis", bm_ch, col, 'M_Aluminum'))
+
+    # ── BACK PLATE: aluminium with cutouts for fans, IEC C14, rear RJ45 ports ──
+    bp_rect = [
+        # IEC C14 cutout
+        (IEC_CX - IEC_CUT_W/2, IEC_CX + IEC_CUT_W/2,
+         IEC_CZ - IEC_CUT_H/2, IEC_CZ + IEC_CUT_H/2),
+        # Rear RJ45 — console
+        (REAR_PORTS[0]['cx'] - REAR_OW/2, REAR_PORTS[0]['cx'] + REAR_OW/2,
+         REAR_PORTS[0]['cz'] - REAR_OH/2, REAR_PORTS[0]['cz'] + REAR_OH/2),
+        # Rear RJ45 — management
+        (REAR_PORTS[1]['cx'] - REAR_OW/2, REAR_PORTS[1]['cx'] + REAR_OW/2,
+         REAR_PORTS[1]['cz'] - REAR_OH/2, REAR_PORTS[1]['cz'] + REAR_OH/2),
+    ]
+    bp_circ = [
+        (FAN1_CX, FAN_CZ, FAN_HOLE_R),
+        (FAN2_CX, FAN_CZ, FAN_HOLE_R),
+    ]
+    parts.append(_sw_holey_plate(
+        f"{name}_back_plate", BACK_Y,
+        bp_rect, bp_circ,
+        col, 'M_Aluminum',
+        x_min=-HW, x_max=HW, z_min=-HH, z_max=HH,
+        outward_plus_y=True,
+    ))
 
     # ─────────────────────────────────────────────────────────────────────
     # FRONT PLATE: aluminium plate with 48 RJ45 + 4 SFP+ holes
@@ -1649,24 +1674,25 @@ def create_network_switch(
     parts.append(_sw_mesh_obj(f"{name}_sfp_bails", bm_bail, col, 'M_Black'))
 
     # ─────────────────────────────────────────────────────────────────────
-    # FANS: shroud ring + 7 swept blades + hub cylinder + duct box
+    # FANS: shroud ring + 9 swept blades + hub cylinder + interior duct box
     # ─────────────────────────────────────────────────────────────────────
     for fi, fcx in enumerate([FAN1_CX, FAN2_CX], 1):
         suffix = f"_{fi}"
-        N_BLADES = 7
+        N_BLADES = 9
+        # ── Shroud ring ──
         bm_fan = bmesh.new()
         N_RING = 48; SR = FAN_SHROUD_R; ST = 0.0025
         outer_f_r = []; outer_b_r = []
         for i in range(N_RING):
             a = 2 * math.pi * i / N_RING
-            outer_f_r.append(bm_fan.verts.new((fcx + SR*math.cos(a), BACK_Y,        FAN_CZ + SR*math.sin(a))))
-            outer_b_r.append(bm_fan.verts.new((fcx + SR*math.cos(a), BACK_Y - ST*3, FAN_CZ + SR*math.sin(a))))
+            outer_f_r.append(bm_fan.verts.new((fcx + SR*math.cos(a), FAN_BACK_Y,        FAN_CZ + SR*math.sin(a))))
+            outer_b_r.append(bm_fan.verts.new((fcx + SR*math.cos(a), FAN_BACK_Y - ST*3, FAN_CZ + SR*math.sin(a))))
         IR = SR - 0.0035
         inner_f_r = []; inner_b_r = []
         for i in range(N_RING):
             a = 2 * math.pi * i / N_RING
-            inner_f_r.append(bm_fan.verts.new((fcx + IR*math.cos(a), BACK_Y,        FAN_CZ + IR*math.sin(a))))
-            inner_b_r.append(bm_fan.verts.new((fcx + IR*math.cos(a), BACK_Y - ST*3, FAN_CZ + IR*math.sin(a))))
+            inner_f_r.append(bm_fan.verts.new((fcx + IR*math.cos(a), FAN_BACK_Y,        FAN_CZ + IR*math.sin(a))))
+            inner_b_r.append(bm_fan.verts.new((fcx + IR*math.cos(a), FAN_BACK_Y - ST*3, FAN_CZ + IR*math.sin(a))))
         for i in range(N_RING):
             n = (i + 1) % N_RING
             _sw_F(bm_fan, [outer_f_r[i], outer_f_r[n], outer_b_r[n], outer_b_r[i]])
@@ -1675,17 +1701,17 @@ def create_network_switch(
             _sw_F(bm_fan, [outer_b_r[i], outer_b_r[n], inner_b_r[n], inner_b_r[i]])
         parts.append(_sw_mesh_obj(f"{name}_fan_shroud{suffix}", bm_fan, col, 'M_Black'))
 
-        # Blades
+        # ── Blades: 9 thin swept blades ──
         bm_bl = bmesh.new()
-        BLADE_R_IN = 0.003; BLADE_R_OUT = IR - 0.001; PITCH = 0.008
+        BLADE_R_IN = 0.005; BLADE_R_OUT = IR - 0.001; PITCH = 0.005
         for b_i in range(N_BLADES):
             angle_base = 2 * math.pi * b_i / N_BLADES
-            angle_tip  = angle_base + 0.45
-            y_in_f  = BACK_Y - 0.003
-            y_out_f = BACK_Y - 0.003 + PITCH
-            y_in_b  = y_in_f  - 0.002
-            y_out_b = y_out_f - 0.002
-            bl_w = 0.0030
+            angle_tip  = angle_base + 0.35          # moderate sweep
+            y_in_f  = FAN_BACK_Y - 0.002
+            y_out_f = FAN_BACK_Y - 0.002 + PITCH
+            y_in_b  = y_in_f  - 0.0015
+            y_out_b = y_out_f - 0.0015
+            bl_w = 0.0015                            # thin blades
             vs_bl = [
                 bm_bl.verts.new((fcx + BLADE_R_IN*math.cos(angle_base)  - bl_w*math.sin(angle_base),  y_in_f,  FAN_CZ + BLADE_R_IN*math.sin(angle_base)  + bl_w*math.cos(angle_base))),
                 bm_bl.verts.new((fcx + BLADE_R_OUT*math.cos(angle_tip)  - bl_w*math.sin(angle_tip),   y_out_f, FAN_CZ + BLADE_R_OUT*math.sin(angle_tip)  + bl_w*math.cos(angle_tip))),
@@ -1701,9 +1727,9 @@ def create_network_switch(
                 except: pass
         parts.append(_sw_mesh_obj(f"{name}_fan_blades{suffix}", bm_bl, col, 'M_DarkGrayMet'))
 
-        # Hub
+        # ── Hub ──
         bm_hub = bmesh.new()
-        HR = 0.0038; HY0 = BACK_Y - 0.003; HY1 = BACK_Y + 0.001
+        HR = 0.0055; HY0 = FAN_BACK_Y - 0.002; HY1 = FAN_BACK_Y + 0.003
         hub_f_v = []; hub_b_v = []
         for i in range(16):
             a = 2 * math.pi * i / 16
@@ -1720,21 +1746,22 @@ def create_network_switch(
             except: pass
         parts.append(_sw_mesh_obj(f"{name}_fan_hub{suffix}", bm_hub, col, 'M_DarkGrayMet'))
 
-        # Duct box
+        # ── Duct box: pushed inside chassis — blocks line-of-sight to front ──
         bm_duct = bmesh.new()
         DZ0 = max(FAN_CZ - FAN_SHROUD_R, -HH + 0.001)
         DZ1 = min(FAN_CZ + FAN_SHROUD_R,  HH - 0.001)
         DX0 = fcx - FAN_SHROUD_R; DX1 = fcx + FAN_SHROUD_R
-        DY0 = BACK_Y; DY1 = BACK_Y - FAN_DUCT_D
+        DY0 = BACK_Y - 0.001                         # just inside back plate
+        DY1 = DY0 - FAN_DUCT_D
         oo_d = [bm_duct.verts.new((DX0, DY0, DZ0)), bm_duct.verts.new((DX1, DY0, DZ0)),
                 bm_duct.verts.new((DX1, DY0, DZ1)), bm_duct.verts.new((DX0, DY0, DZ1))]
         ii_d = [bm_duct.verts.new((DX0, DY1, DZ0)), bm_duct.verts.new((DX1, DY1, DZ0)),
                 bm_duct.verts.new((DX1, DY1, DZ1)), bm_duct.verts.new((DX0, DY1, DZ1))]
-        _sw_F(bm_duct, [ii_d[0], ii_d[1], ii_d[2], ii_d[3]])
-        _sw_F(bm_duct, [oo_d[0], ii_d[0], ii_d[3], oo_d[3]])
-        _sw_F(bm_duct, [oo_d[1], oo_d[2], ii_d[2], ii_d[1]])
-        _sw_F(bm_duct, [oo_d[0], oo_d[1], ii_d[1], ii_d[0]])
-        _sw_F(bm_duct, [oo_d[3], ii_d[3], ii_d[2], oo_d[2]])
+        _sw_F(bm_duct, [ii_d[0], ii_d[1], ii_d[2], ii_d[3]])  # back face (solid)
+        _sw_F(bm_duct, [oo_d[0], ii_d[0], ii_d[3], oo_d[3]])  # left wall
+        _sw_F(bm_duct, [oo_d[1], oo_d[2], ii_d[2], ii_d[1]])  # right wall
+        _sw_F(bm_duct, [oo_d[0], oo_d[1], ii_d[1], ii_d[0]])  # bottom wall
+        _sw_F(bm_duct, [oo_d[3], ii_d[3], ii_d[2], oo_d[2]])  # top wall
         parts.append(_sw_mesh_obj(f"{name}_fan_duct{suffix}", bm_duct, col, 'M_BlackMatte'))
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1949,15 +1976,15 @@ def create_network_switch(
         parts.append(_sw_mesh_obj(f"{name}_sled_{sled_label}", bm_sl, col, smat))
 
     # ─────────────────────────────────────────────────────────────────────
-    # TOP LOUVERS — low-profile vent slits spanning most of chassis width
-    # 3 mm tall, 1 mm wide, 8 mm pitch, runs front-to-back (Y)
+    # TOP LOUVERS — horizontal slats spanning full width (L→R), toward rear of chassis
+    # 0.2 mm proud of chassis top (barely peeking through), 2 mm deep, 4 mm pitch
     # ─────────────────────────────────────────────────────────────────────
-    LOUVER_W = 0.001; LOUVER_GAP = 0.007; LOUVER_H = 0.003
-    N_LOUVERS = 46; START_X_L = -0.190
+    LOUVER_D = 0.0020; LOUVER_GAP = 0.0040; LOUVER_H = 0.0002
+    N_LOUVERS = 20; START_Y_L = 0.010
     bm_louv = bmesh.new()
     for i in range(N_LOUVERS):
-        lx = START_X_L + i * (LOUVER_W + LOUVER_GAP)
-        _sw_box(bm_louv, lx, lx + LOUVER_W, -0.110, 0.110, HH, HH + LOUVER_H)
+        ly = START_Y_L + i * (LOUVER_D + LOUVER_GAP)
+        _sw_box(bm_louv, -HW + 0.005, HW - 0.005, ly, ly + LOUVER_D, HH - 0.0005, HH + LOUVER_H)
     parts.append(_sw_mesh_obj(f"{name}_top_louvers", bm_louv, col, 'M_DarkGrayMet'))
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1972,11 +1999,73 @@ def create_network_switch(
         bm_vent = bmesh.new()
         for i in range(N_VENTS):
             vz = start_z_v + i * (VENT_SLOT_H + VENT_SLOT_GAP)
-            x0_v = x_pos - 0.001 if x_pos > 0 else x_pos
-            x1_v = x_pos          if x_pos > 0 else x_pos + 0.001
+            x0_v = x_pos - 0.001  if x_pos > 0 else x_pos - 0.0002
+            x1_v = x_pos + 0.0002 if x_pos > 0 else x_pos + 0.001
             _sw_box(bm_vent, x0_v, x1_v, VENT_Y0, VENT_Y1, vz, vz + VENT_SLOT_H)
         side_label = 'R' if x_pos > 0 else 'L'
         parts.append(_sw_mesh_obj(f"{name}_side_vents_{side_label}", bm_vent, col, 'M_Black'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PORT LABELS — numbers printed in the top wall of each port housing face
+    # Sits in the WALL-height strip at the very top of each housing opening
+    # SFP+ labelled 49–52 centred in each cage opening
+    # ─────────────────────────────────────────────────────────────────────
+    LABEL_Y    = PORT_FRONT_Y - 0.0002    # just proud of the housing face
+    LABEL_SIZE = 0.0009                    # 0.9mm — fits inside WALL=1.4mm
+    LABEL_EXT  = 0.00012                   # 0.12mm extrusion
+    # Top wall strip center of each housing row
+    LBL_Z_UP   = Z_UPPER + OH / 2 - WALL / 2   # inside top wall of upper housing
+    LBL_Z_LO   = Z_LOWER + OH / 2 - WALL / 2   # inside top wall of lower housing
+
+    _lbl_objs = []
+
+    def _add_lbl(text_str: str, lx: float, lz: float) -> None:
+        fc = bpy.data.curves.new("_sw_lbl_fc", type='FONT')
+        fc.body = text_str
+        fc.size = LABEL_SIZE
+        fc.extrude = LABEL_EXT
+        fc.align_x = 'CENTER'
+        fc.align_y = 'CENTER'
+        o = bpy.data.objects.new("_sw_lbl_obj", fc)
+        bpy.context.scene.collection.objects.link(o)
+        o.rotation_euler = (math.pi / 2, 0, 0)   # face toward -Y (front viewer)
+        o.location = (lx, LABEL_Y, lz)
+        _lbl_objs.append(o)
+
+    port_num = 1
+    for g in range(N_GROUPS):
+        gx = port_left_edge + g * (single_grp_w + GRP_GAP)
+        for p in range(G_SIZE):
+            cx = gx + p * (PW + GAP_X) + PW / 2
+            _add_lbl(str(port_num),     cx, LBL_Z_UP)
+            _add_lbl(str(port_num + 1), cx, LBL_Z_LO)
+            port_num += 2
+
+    for ci_sfp, (sx0, sx1, sz0, sz1) in enumerate(SFP_CAGES_DEF, 49):
+        _add_lbl(str(ci_sfp), (sx0 + sx1) / 2, (sz0 + sz1) / 2)
+
+    if _lbl_objs:
+        bpy.context.view_layer.update()
+        dep = bpy.context.evaluated_depsgraph_get()
+        bm_lbl = bmesh.new()
+        for fo in _lbl_objs:
+            me_tmp = bpy.data.meshes.new_from_object(fo.evaluated_get(dep))
+            bm_t = bmesh.new()
+            bm_t.from_mesh(me_tmp)
+            bmesh.ops.transform(bm_t, matrix=fo.matrix_world, verts=bm_t.verts[:])
+            nv = [bm_lbl.verts.new(v.co) for v in bm_t.verts]
+            bm_lbl.verts.ensure_lookup_table()
+            bm_t.verts.ensure_lookup_table()
+            bm_t.faces.ensure_lookup_table()
+            for f in bm_t.faces:
+                try: bm_lbl.faces.new([nv[v.index] for v in f.verts])
+                except: pass
+            bm_t.free()
+            bpy.data.meshes.remove(me_tmp)
+            fc_data = fo.data
+            bpy.data.objects.remove(fo)
+            bpy.data.curves.remove(fc_data)
+        parts.append(_sw_mesh_obj(f"{name}_port_labels", bm_lbl, col, 'M_White'))
 
     # ─────────────────────────────────────────────────────────────────────
     # TRANSLATE all vertices: centred coords → equipment-origin convention
