@@ -277,6 +277,9 @@ def _sw_ensure_materials() -> None:
     _pbr('M_LED_White',   (0.90, 0.90, 0.90), metallic=0.0, roughness=0.20,
           emission=(0.90, 0.90, 0.90), strength=3.0)
     _pbr('M_White',       (0.90, 0.90, 0.90), metallic=0.0, roughness=0.50)
+    _pbr('M_ServerBody',  (0.055, 0.060, 0.065), metallic=0.7,  roughness=0.35)
+    _pbr('M_LED_Blue',    (0.003, 0.050, 0.180), metallic=0.0,  roughness=0.25,
+          emission=(0.003, 0.050, 0.180), strength=8.0)
 
 
 # ── Tool 1: create_server_chassis ─────────────────────────────────────────
@@ -292,6 +295,7 @@ def create_server_chassis(
     collection_name: str = "Equipment",
     random_variation: bool = False,
     quality: str = "high",
+    join_mesh: bool = False,
 ) -> Dict[str, Any]:
     """
     Create a parametric server chassis with detailed front bezel geometry.
@@ -347,222 +351,845 @@ def create_server_chassis(
     actual_bays = 0
 
     if u_size == 1:
-        # ── 1U front face: 2-row bay grid + real control cluster ──────────
-        bz_y = -st / 2
-        bz_d = st
+        # ── Hero 1U server front + rear — all geometry in centred coords ──
+        # Centred: X=0 = chassis CL, Y=0 = mid-depth, Z=0 = vertical midpoint
+        # After the translation loop below, origin moves to front-face-bottom-centre.
+        _sw_ensure_materials()
 
-        if qf["bezel"]:
-            # Thin top and bottom bezel strips
-            parts.append(_create_box_object(f"{name}_bz_top",
-                cx=0.0, cy=bz_y, cz=h - h * 0.045,
-                w=w - 0.004, d=bz_d, h=h * 0.07, collection=col))
-            parts.append(_create_box_object(f"{name}_bz_bot",
-                cx=0.0, cy=bz_y, cz=h * 0.035,
-                w=w - 0.004, d=bz_d, h=h * 0.06, collection=col))
+        HW = w / 2       # 0.223
+        HH = h / 2       # 0.022225
+        FRONT_Y = -(d / 2)
+        BACK_Y  =  d / 2
 
-        if qf["server_bays"] and drive_bays > 0:
-            actual_bays = drive_bays
-            if random_variation and drive_bays > 1:
-                actual_bays = max(2, drive_bays + _random.randint(-1, 1))
-                if actual_bays % 2:
-                    actual_bays += 1  # keep even so rows are balanced
+        # Delete chassis rear face — replaced by holey bm_rear_bg panel below
+        _bm_rear_del = bmesh.new()
+        _bm_rear_del.from_mesh(parts[0].data)
+        _rear_faces = [f for f in _bm_rear_del.faces
+                       if f.calc_center_median().y > (d / 2 * 0.97)]
+        bmesh.ops.delete(_bm_rear_del, geom=_rear_faces, context='FACES_ONLY')
+        _bm_rear_del.to_mesh(parts[0].data)
+        _bm_rear_del.free()
+        parts[0].data.update()
 
-            bay_cols = max(1, (actual_bays + 1) // 2)
-            bay_rows = 2 if actual_bays > 1 else 1
+        # ── Drive bay layout ──────────────────────────────────────────────
+        L_MARG   = 0.010   # left margin (service tag zone)
+        R_MARG   = 0.006   # right margin
+        CTRL_W   = 0.058   # control panel zone width
 
-            bay_left    = -(w * 0.5) + 0.015   # 15 mm from left body edge
-            bay_area_w  = w * 0.70              # 70% of body width
-            bay_area_h  = h * 0.78              # 78% of chassis height
-            bay_area_z0 = (h - bay_area_h) / 2
-            bay_cx      = bay_left + bay_area_w / 2
-            bay_cz      = bay_area_z0 + bay_area_h / 2
+        BAY_X0   = -HW + L_MARG
+        BAY_X1   =  HW - R_MARG - CTRL_W
+        BAY_ZONE_W = BAY_X1 - BAY_X0
 
-            gap_x = 0.0015
-            gap_z = 0.0020
+        CTRL_X0  = BAY_X1
+        CTRL_X1  = HW - R_MARG
+        CTRL_CX  = (CTRL_X0 + CTRL_X1) / 2
 
-            bay_w = (bay_area_w - gap_x * (bay_cols - 1)) / bay_cols
-            bay_h = (bay_area_h - gap_z * (bay_rows - 1)) / bay_rows
+        BAY_ZONE_H = h * 0.82
+        BAY_Z0   = -BAY_ZONE_H / 2
+        BAY_Z1   =  BAY_ZONE_H / 2
+        BAY_RECESS_D = 0.010
 
-            # ── Optimised bay geometry: 1 background plate + separators +
-            #    per-carrier face plates.  Replaces per-bay housing/tray/lip
-            #    stack (5 objects × N bays) with a shared grid — ~55% fewer tris.
-            bg_d = 0.014 if qf.get("deep_bays") else (0.008 if qf["bay_3d"] else 0.004)
+        # Carrier grid
+        bay_cols = max(1, (drive_bays + 1) // 2) if drive_bays > 0 else 0
+        bay_rows = 2 if drive_bays > 1 else (1 if drive_bays == 1 else 0)
+        if bay_cols > 0:
+            GAP_X_BAY = 0.0015
+            GAP_Z_BAY = 0.0018
+            carrier_w = (BAY_ZONE_W - GAP_X_BAY * (bay_cols - 1)) / bay_cols
+            carrier_h = (BAY_ZONE_H - GAP_Z_BAY * (bay_rows - 1)) / bay_rows
+        actual_bays = drive_bays  # hero always uses exact requested count
 
-            # Single recessed background spanning the whole bay zone
-            parts.append(_create_box_object(f"{name}_bay_bg",
-                cx=bay_cx, cy=bg_d / 2, cz=bay_cz,
-                w=bay_area_w, d=bg_d, h=bay_area_h, collection=col))
+        # ── Front plate ──────────────────────────────────────────────────
+        fp_rect_holes = [
+            (BAY_X0, BAY_X1, BAY_Z0, BAY_Z1),
+            (-HW + 0.001, -HW + 0.013, -h * 0.22, h * 0.22),
+            (CTRL_X0 + 0.001, CTRL_X1 - 0.001, BAY_Z0 + 0.001, BAY_Z1 - 0.001),
+        ]
+        parts.append(_sw_holey_plate(
+            f"{name}_front_plate", FRONT_Y,
+            fp_rect_holes, [],
+            col, 'M_DarkGrayMet',
+            x_min=-HW, x_max=HW,
+            z_min=-HH, z_max=HH,
+            outward_plus_y=False,
+        ))
 
-            # Vertical separators between columns (fills the gap_x slots)
-            for ci in range(1, bay_cols):
-                sx = bay_left + ci * (bay_w + gap_x) - gap_x / 2
-                parts.append(_create_box_object(f"{name}_bay_vsep_{ci}",
-                    cx=sx, cy=bg_d / 2, cz=bay_cz,
-                    w=gap_x, d=bg_d + 0.001, h=bay_area_h, collection=col))
+        # ── Bay background plate ──────────────────────────────────────────
+        bm_bay_bg = bmesh.new()
+        _sw_box(bm_bay_bg, BAY_X0, BAY_X1,
+                FRONT_Y + 0.002, FRONT_Y + BAY_RECESS_D,
+                BAY_Z0, BAY_Z1)
+        parts.append(_sw_mesh_obj(f"{name}_bay_bg", bm_bay_bg, col, 'M_PlasticDark'))
 
-            # Horizontal separator between rows
-            if bay_rows == 2:
-                hs_z = bay_area_z0 + bay_h + gap_z / 2
-                parts.append(_create_box_object(f"{name}_bay_hsep",
-                    cx=bay_cx, cy=bg_d / 2, cz=hs_z,
-                    w=bay_area_w, d=bg_d + 0.001, h=gap_z, collection=col))
+        # ── Top louver strip ──────────────────────────────────────────────
+        bm_louv = bmesh.new()
+        LOUVER_H_DIM = 0.0004
+        LOUVER_GAP_Z = 0.0014
+        for i in range(6):
+            z_top = HH - 0.0003 - i * (LOUVER_H_DIM + LOUVER_GAP_Z)
+            _sw_box(bm_louv, -HW + 0.005, HW - 0.005,
+                    FRONT_Y + h * 0.3, FRONT_Y + h * 0.8,
+                    z_top - LOUVER_H_DIM, z_top + 0.00005)
+        parts.append(_sw_mesh_obj(f"{name}_top_louvers", bm_louv, col, 'M_DarkGrayMet'))
 
-            # Individual carrier face plates + per-row handle strip
+        # ── Service tag ───────────────────────────────────────────────────
+        bm_tag = bmesh.new()
+        TAG_W = 0.011; TAG_H = h * 0.55; TAG_D = 0.0008
+        TAG_X = -HW + 0.0075
+        _sw_box(bm_tag, TAG_X - TAG_W / 2, TAG_X + TAG_W / 2,
+                FRONT_Y - TAG_D, FRONT_Y,
+                -TAG_H / 2, TAG_H / 2)
+        # Knob at bottom
+        _sw_box(bm_tag, TAG_X - 0.003, TAG_X + 0.003,
+                FRONT_Y - 0.004, FRONT_Y,
+                -TAG_H / 2 - 0.004, -TAG_H / 2)
+        parts.append(_sw_mesh_obj(f"{name}_svc_tag", bm_tag, col, 'M_PlasticDark'))
+
+        # ── Carrier faces, vents, handles, LEDs ──────────────────────────
+        if bay_cols > 0:
+            bm_carriers = bmesh.new()
+            bm_vents    = bmesh.new()
+            bm_handles  = bmesh.new()
+            bm_leds     = bmesh.new()
+
+            _lbl_objs_carr = []
+            LABEL_SIZE = 0.0008
+            LABEL_EXT  = 0.00010
+            LABEL_Y_carr = FRONT_Y - 0.0002
+
+            def _add_carr_lbl(text_str, lx, lz):
+                fc = bpy.data.curves.new("_srv_lbl_fc", type='FONT')
+                fc.body = text_str
+                fc.size = LABEL_SIZE
+                fc.extrude = LABEL_EXT
+                fc.align_x = 'CENTER'
+                fc.align_y = 'CENTER'
+                o = bpy.data.objects.new("_srv_lbl_obj", fc)
+                bpy.context.scene.collection.objects.link(o)
+                o.rotation_euler = (math.pi / 2, 0, 0)
+                o.location = (lx, LABEL_Y_carr, lz)
+                _lbl_objs_carr.append(o)
+
             for row in range(bay_rows):
-                rz = bay_area_z0 + (row + 0.5) * bay_h + row * gap_z
                 for col_i in range(bay_cols):
                     idx = row * bay_cols + col_i
-                    if idx >= actual_bays:
+                    if idx >= drive_bays:
                         break
-                    bx = bay_left + (col_i + 0.5) * bay_w + col_i * gap_x
-                    bx = _jitter(bx, 0.0005, random_variation)
+                    cx = BAY_X0 + (col_i + 0.5) * carrier_w + col_i * GAP_X_BAY
+                    cz = BAY_Z0 + (row + 0.5) * carrier_h + row * GAP_Z_BAY
 
-                    # Carrier face (thin plate at face level)
-                    parts.append(_create_box_object(f"{name}_carr_{idx:02d}",
-                        cx=bx, cy=0.0010, cz=rz,
-                        w=bay_w - 0.002, d=0.0020, h=bay_h - 0.002, collection=col))
+                    # Carrier face (slightly proud of front plate)
+                    CARR_Y0 = FRONT_Y + 0.0002
+                    CARR_Y1 = FRONT_Y - 0.0018
+                    _sw_box(bm_carriers,
+                            cx - carrier_w / 2 + 0.001, cx + carrier_w / 2 - 0.001,
+                            CARR_Y1, CARR_Y0,
+                            cz - carrier_h / 2 + 0.001, cz + carrier_h / 2 - 0.001)
 
-                    if qf["bay_3d"]:
-                        # ultra: individual eject handles per bay
-                        hdl_cx = bx - (bay_w / 2) + 0.005
-                        parts.append(_create_box_object(f"{name}_bay_hdl_{idx:02d}",
-                            cx=hdl_cx, cy=-bg_d - 0.003, cz=rz,
-                            w=0.004, d=0.003, h=bay_h - 0.004, collection=col))
-                        if qf.get("detailed_handles"):
-                            # hero: pivot pin stubs at top and bottom of handle
-                            for pin_z_off in (-bay_h * 0.44, bay_h * 0.44):
-                                parts.append(_create_box_object(
-                                    f"{name}_bay_pin_{idx:02d}_{('T' if pin_z_off > 0 else 'B')}",
-                                    cx=hdl_cx, cy=-bg_d - 0.0055, cz=rz + pin_z_off,
-                                    w=0.006, d=0.002, h=0.003, collection=col))
-                            # latch tab (small proud nub on carrier face, right edge)
-                            parts.append(_create_box_object(f"{name}_bay_latch_{idx:02d}",
-                                cx=bx + (bay_w / 2) - 0.004, cy=-0.0035, cz=rz,
-                                w=0.004, d=0.002, h=bay_h * 0.28, collection=col))
-
-                if not qf["bay_3d"] and qf["server_bays"]:
-                    # high/medium: one handle rail per row (cheap single box)
-                    parts.append(_create_box_object(f"{name}_bay_hdl_row_{row}",
-                        cx=bay_left + 0.004, cy=-bg_d - 0.003, cz=rz,
-                        w=0.004, d=0.003, h=bay_h - 0.004, collection=col))
-
-            if qf["bezel"]:
-                # Activity LED strip — one slim box per row (top-left corner)
-                for row in range(bay_rows):
-                    lz = bay_area_z0 + (row + 0.5) * bay_h + row * gap_z + bay_h * 0.37
-                    parts.append(_create_box_object(f"{name}_bay_led_{row}",
-                        cx=bay_left + 0.009, cy=-bg_d - 0.001, cz=lz,
-                        w=0.003, d=0.001, h=0.002, collection=col))
-                    if qf.get("led_emissive"):
-                        # hero: proud lens dome on each LED
-                        parts.append(_create_box_object(f"{name}_bay_led_lens_{row}",
-                            cx=bay_left + 0.009, cy=-bg_d - 0.0025, cz=lz,
-                            w=0.0025, d=0.0015, h=0.0025, collection=col))
-
-        # Right control panel zone
-        ctrl_cx = w * 0.385
-        ctrl_hw = w * 0.095
-
-        if qf["bezel"]:
-            parts.append(_create_box_object(f"{name}_ctrl_panel",
-                cx=ctrl_cx, cy=bz_y, cz=h / 2,
-                w=ctrl_hw * 2 - 0.002, d=bz_d, h=h * 0.84, collection=col))
-
-            pwr_z = _jitter(h * 0.74, 0.002, random_variation)
-            parts.append(_create_box_object(f"{name}_pwr",
-                cx=ctrl_cx, cy=-0.003, cz=pwr_z,
-                w=0.008, d=0.003, h=0.008, collection=col))
-            if qf.get("led_emissive"):
-                parts.append(_create_box_object(f"{name}_pwr_lens",
-                    cx=ctrl_cx, cy=-0.0048, cz=pwr_z,
-                    w=0.006, d=0.0015, h=0.006, collection=col))
-
-            parts.append(_create_box_object(f"{name}_uid",
-                cx=ctrl_cx, cy=-0.002, cz=h * 0.57,
-                w=0.005, d=0.002, h=0.005, collection=col))
-            if qf.get("led_emissive"):
-                parts.append(_create_box_object(f"{name}_uid_lens",
-                    cx=ctrl_cx, cy=-0.0038, cz=h * 0.57,
-                    w=0.004, d=0.0015, h=0.004, collection=col))
-
-            for li, lz_frac in enumerate((0.44, 0.37, 0.30)):
-                lz = _jitter(h * lz_frac, 0.001, random_variation)
-                parts.append(_create_box_object(f"{name}_sled_{li}",
-                    cx=ctrl_cx - ctrl_hw * 0.55, cy=-0.003, cz=lz,
-                    w=0.003, d=0.002, h=0.003, collection=col))
-
-            for ui, uz_frac in enumerate((0.20, 0.11)):
-                # Outer frame (at face level)
-                parts.append(_create_box_object(f"{name}_usb_{ui}_frm",
-                    cx=ctrl_cx, cy=-0.0010, cz=h * uz_frac,
-                    w=0.013, d=0.0020, h=0.009, collection=col))
-                # Recessed inner face
-                parts.append(_create_box_object(f"{name}_usb_{ui}_inn",
-                    cx=ctrl_cx, cy=0.0050, cz=h * uz_frac,
-                    w=0.009, d=0.0025, h=0.005, collection=col))
-
-            # Service tag pull-tab (far left)
-            parts.append(_create_box_object(f"{name}_svc_tag",
-                cx=-(w * 0.5) + 0.008, cy=-0.001, cz=h / 2,
-                w=0.012, d=0.001, h=h * 0.38, collection=col))
-
-        # ── 1U rear face: dual PSUs, PCIe brackets, I/O cluster ──────────
-        if qf["bezel"]:
-            psu_w = w * 0.175
-
-            for pi, psu_cx in enumerate((
-                -(w / 2) + psu_w * 0.5 + 0.005,
-                -(w / 2) + psu_w * 1.5 + 0.010,
-            )):
-                parts.append(_create_box_object(f"{name}_psu_{pi}_face",
-                    cx=psu_cx, cy=d + 0.001, cz=h / 2,
-                    w=psu_w - 0.003, d=0.002, h=h * 0.90, collection=col))
-                parts.append(_create_box_object(f"{name}_psu_{pi}_c14",
-                    cx=psu_cx, cy=d + 0.004, cz=h * 0.32,
-                    w=0.022, d=0.003, h=0.014, collection=col))
-                parts.append(_create_box_object(f"{name}_psu_{pi}_hdl",
-                    cx=psu_cx, cy=d + 0.005, cz=h * 0.88,
-                    w=psu_w - 0.008, d=0.004, h=h * 0.07, collection=col))
-                if qf["bay_3d"]:
+                    # Vent slots (3 horizontal, right 65% of carrier)
+                    VENT_H_DIM = 0.0007; VENT_D = 0.0003; VENT_W = carrier_w * 0.60
+                    vx0 = cx - VENT_W / 2 + carrier_w * 0.10
+                    vx1 = cx + VENT_W / 2 + carrier_w * 0.10
                     for vi in range(3):
-                        vz = h * 0.52 + vi * h * 0.09
-                        parts.append(_create_box_object(f"{name}_psu_{pi}_vent_{vi}",
-                            cx=psu_cx, cy=d + 0.003, cz=vz,
-                            w=psu_w * 0.78, d=0.0015, h=0.003, collection=col))
-                parts.append(_create_box_object(f"{name}_psu_{pi}_led",
-                    cx=psu_cx + psu_w * 0.32, cy=d + 0.004, cz=h * 0.82,
-                    w=0.004, d=0.003, h=0.004, collection=col))
+                        vz = cz + (vi - 1) * 0.0030
+                        _sw_box(bm_vents, vx0, vx1,
+                                CARR_Y1 - VENT_D, CARR_Y1,
+                                vz - VENT_H_DIM / 2, vz + VENT_H_DIM / 2)
 
-            pcie_x0      = -(w / 2) + w * 0.38
-            pcie_slot_w  = w * 0.14
-            for si in range(2):
-                sx = pcie_x0 + (si + 0.5) * pcie_slot_w + si * 0.003
-                parts.append(_create_box_object(f"{name}_pcie_{si}_brk",
-                    cx=sx, cy=d + 0.001, cz=h / 2,
-                    w=pcie_slot_w - 0.003, d=0.002, h=h * 0.88, collection=col))
-                if qf["bay_3d"]:
-                    for vi in range(4):
-                        vz = h * 0.12 + vi * h * 0.19
-                        parts.append(_create_box_object(f"{name}_pcie_{si}_vent_{vi}",
-                            cx=sx, cy=d + 0.002, cz=vz,
-                            w=pcie_slot_w * 0.72, d=0.0015, h=0.003, collection=col))
+                    if qf["detailed_handles"]:
+                        # L-shaped pull handle (left side)
+                        HDL_X = cx - carrier_w / 2 + 0.0045
+                        HDL_W_DIM = 0.0055; HDL_H_DIM = carrier_h * 0.72; HDL_D = 0.0038
+                        # Vertical shaft
+                        _sw_box(bm_handles,
+                                HDL_X - HDL_W_DIM / 2, HDL_X + HDL_W_DIM / 2,
+                                FRONT_Y - HDL_D, FRONT_Y - 0.0002,
+                                cz - HDL_H_DIM / 2, cz + HDL_H_DIM / 2)
+                        # Toe tab (horizontal hook at bottom)
+                        _sw_box(bm_handles,
+                                HDL_X - HDL_W_DIM / 2, HDL_X - HDL_W_DIM / 2 + carrier_w * 0.22,
+                                FRONT_Y - HDL_D, FRONT_Y - 0.0002,
+                                cz - HDL_H_DIM / 2, cz - HDL_H_DIM / 2 + 0.0042)
 
-            io_cx = w * 0.30
-            for li in range(2):
-                lx = _jitter(io_cx + (li - 0.5) * 0.018, 0.001, random_variation)
-                parts.append(_create_box_object(f"{name}_rear_lan_{li}",
-                    cx=lx, cy=d + 0.004, cz=h * 0.65,
-                    w=0.014, d=0.004, h=0.010, collection=col))
-            for ui in range(2):
-                parts.append(_create_box_object(f"{name}_rear_usb_{ui}",
-                    cx=io_cx, cy=d + 0.003, cz=h * (0.44 - ui * 0.16),
-                    w=0.009, d=0.003, h=0.005, collection=col))
-            parts.append(_create_box_object(f"{name}_rear_vga",
-                cx=io_cx + 0.020, cy=d + 0.003, cz=h * 0.54,
-                w=0.018, d=0.003, h=0.010, collection=col))
-            parts.append(_create_box_object(f"{name}_rear_mgmt",
-                cx=io_cx - 0.020, cy=d + 0.003, cz=h * 0.36,
-                w=0.010, d=0.003, h=0.007, collection=col))
+                    if qf["led_emissive"]:
+                        # Activity LED (top-right of carrier)
+                        LED_X = cx + carrier_w / 2 - 0.0060
+                        LED_Z_pos = cz + carrier_h / 2 - 0.0035
+                        _sw_box(bm_leds,
+                                LED_X - 0.0012, LED_X + 0.0012,
+                                CARR_Y1 - 0.0008, CARR_Y1,
+                                LED_Z_pos - 0.0012, LED_Z_pos + 0.0012)
+
+                    if qf["bezel"]:
+                        # Drive bay label
+                        _add_carr_lbl(str(idx + 1), cx, cz + carrier_h / 2 - 0.0040)
+
+            parts.append(_sw_mesh_obj(f"{name}_carrier_faces",   bm_carriers, col, 'M_PlasticDark'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_vents",   bm_vents,    col, 'M_Black'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_handles", bm_handles,  col, 'M_Black'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_leds",    bm_leds,     col, 'M_LED_Green'))
+
+            # Bake drive bay labels
+            if qf["bezel"] and _lbl_objs_carr:
+                bpy.context.view_layer.update()
+                dep = bpy.context.evaluated_depsgraph_get()
+                bm_lbl_carr = bmesh.new()
+                for fo in _lbl_objs_carr:
+                    me_tmp = bpy.data.meshes.new_from_object(fo.evaluated_get(dep))
+                    bm_t = bmesh.new()
+                    bm_t.from_mesh(me_tmp)
+                    bmesh.ops.transform(bm_t, matrix=fo.matrix_world, verts=bm_t.verts[:])
+                    nv = [bm_lbl_carr.verts.new(v.co) for v in bm_t.verts]
+                    bm_lbl_carr.verts.ensure_lookup_table()
+                    bm_t.verts.ensure_lookup_table()
+                    bm_t.faces.ensure_lookup_table()
+                    for f_t in bm_t.faces:
+                        try: bm_lbl_carr.faces.new([nv[v.index] for v in f_t.verts])
+                        except: pass
+                    bm_t.free()
+                    bpy.data.meshes.remove(me_tmp)
+                    fc_data = fo.data
+                    bpy.data.objects.remove(fo)
+                    bpy.data.curves.remove(fc_data)
+                parts.append(_sw_mesh_obj(f"{name}_bay_labels", bm_lbl_carr, col, 'M_White'))
+
+        # ── Control panel ────────────────────────────────────────────────
+        bm_ctrl = bmesh.new()
+        _sw_box(bm_ctrl, CTRL_X0 + 0.001, CTRL_X1 - 0.001,
+                FRONT_Y + 0.0020, FRONT_Y - 0.0005,
+                BAY_Z0 + 0.001, BAY_Z1 - 0.001)
+        parts.append(_sw_mesh_obj(f"{name}_ctrl_bg", bm_ctrl, col, 'M_DarkGrayMet'))
+
+        # Power button — 8-sided cap head
+        PWR_CX = CTRL_CX; PWR_CZ = HH * 0.52; PWR_R = 0.0038; PWR_T = 0.0030
+        PWR_SEG = 8; PWR_Y = FRONT_Y - 0.0030
+        bm_pwr = bmesh.new()
+        fv_p = []; bv_p = []
+        for i in range(PWR_SEG):
+            a = math.pi / PWR_SEG + 2 * math.pi * i / PWR_SEG
+            fv_p.append(bm_pwr.verts.new((PWR_CX + PWR_R * math.cos(a), PWR_Y,           PWR_CZ + PWR_R * math.sin(a))))
+            bv_p.append(bm_pwr.verts.new((PWR_CX + PWR_R * math.cos(a), PWR_Y + PWR_T,   PWR_CZ + PWR_R * math.sin(a))))
+        cf_p = bm_pwr.verts.new((PWR_CX, PWR_Y,           PWR_CZ))
+        cb_p = bm_pwr.verts.new((PWR_CX, PWR_Y + PWR_T,   PWR_CZ))
+        for i in range(PWR_SEG):
+            n = (i + 1) % PWR_SEG
+            _sw_F(bm_pwr, [fv_p[i], fv_p[n], bv_p[n], bv_p[i]])
+            try: bm_pwr.faces.new([cf_p, fv_p[n], fv_p[i]])
+            except: pass
+            try: bm_pwr.faces.new([cb_p, bv_p[i], bv_p[n]])
+            except: pass
+        parts.append(_sw_mesh_obj(f"{name}_pwr_btn", bm_pwr, col, 'M_Black'))
+
+        # Power LED ring
+        if qf["led_emissive"]:
+            PWR_RING_OR = PWR_R + 0.0018; PWR_RING_IR = PWR_R + 0.0004; PWR_RING_D = 0.0005
+            bm_pwr_led = bmesh.new()
+            N_RNG = 16
+            fr_o = []; fr_i = []; bk_o = []; bk_i = []
+            for i in range(N_RNG):
+                a = 2 * math.pi * i / N_RNG
+                co = math.cos(a); si = math.sin(a)
+                fr_o.append(bm_pwr_led.verts.new((PWR_CX + PWR_RING_OR * co, PWR_Y,                  PWR_CZ + PWR_RING_OR * si)))
+                fr_i.append(bm_pwr_led.verts.new((PWR_CX + PWR_RING_IR * co, PWR_Y,                  PWR_CZ + PWR_RING_IR * si)))
+                bk_o.append(bm_pwr_led.verts.new((PWR_CX + PWR_RING_OR * co, PWR_Y + PWR_RING_D,     PWR_CZ + PWR_RING_OR * si)))
+                bk_i.append(bm_pwr_led.verts.new((PWR_CX + PWR_RING_IR * co, PWR_Y + PWR_RING_D,     PWR_CZ + PWR_RING_IR * si)))
+            for i in range(N_RNG):
+                n = (i + 1) % N_RNG
+                _sw_F(bm_pwr_led, [fr_o[i], fr_i[i], fr_i[n], fr_o[n]])   # front annulus
+                _sw_F(bm_pwr_led, [bk_o[i], bk_o[n], bk_i[n], bk_i[i]])   # back annulus
+                _sw_F(bm_pwr_led, [fr_o[i], fr_o[n], bk_o[n], bk_o[i]])   # outer wall
+                _sw_F(bm_pwr_led, [fr_i[i], bk_i[i], bk_i[n], fr_i[n]])   # inner wall
+            parts.append(_sw_mesh_obj(f"{name}_pwr_led", bm_pwr_led, col, 'M_LED_Green'))
+
+        # UID button — small square
+        bm_uid = bmesh.new()
+        _sw_box(bm_uid,
+                CTRL_CX + 0.012 - 0.0025, CTRL_CX + 0.012 + 0.0025,
+                FRONT_Y - 0.0028, FRONT_Y - 0.0005,
+                HH * 0.18 - 0.0025, HH * 0.18 + 0.0025)
+        parts.append(_sw_mesh_obj(f"{name}_uid_btn", bm_uid, col, 'M_DarkGrayMet'))
+
+        if qf["led_emissive"]:
+            # UID LED ring — thin box frame around button
+            bm_uid_led = bmesh.new()
+            UID_CX_u = CTRL_CX + 0.012; UID_CZ_u = HH * 0.18
+            UID_OR = 0.0040; UID_IR = 0.0025; UID_D = 0.0004
+            _sw_box(bm_uid_led,  # top rail
+                    UID_CX_u - UID_OR, UID_CX_u + UID_OR,
+                    FRONT_Y - 0.0028, FRONT_Y - 0.0028 + UID_D,
+                    UID_CZ_u + UID_IR, UID_CZ_u + UID_OR)
+            _sw_box(bm_uid_led,  # bottom rail
+                    UID_CX_u - UID_OR, UID_CX_u + UID_OR,
+                    FRONT_Y - 0.0028, FRONT_Y - 0.0028 + UID_D,
+                    UID_CZ_u - UID_OR, UID_CZ_u - UID_IR)
+            _sw_box(bm_uid_led,  # left rail
+                    UID_CX_u - UID_OR, UID_CX_u - UID_IR,
+                    FRONT_Y - 0.0028, FRONT_Y - 0.0028 + UID_D,
+                    UID_CZ_u - UID_OR, UID_CZ_u + UID_OR)
+            _sw_box(bm_uid_led,  # right rail
+                    UID_CX_u + UID_IR, UID_CX_u + UID_OR,
+                    FRONT_Y - 0.0028, FRONT_Y - 0.0028 + UID_D,
+                    UID_CZ_u - UID_OR, UID_CZ_u + UID_OR)
+            parts.append(_sw_mesh_obj(f"{name}_uid_led", bm_uid_led, col, 'M_LED_Blue'))
+
+        # Status LEDs (3 small, vertically stacked left of power button)
+        SLED_CX = CTRL_X0 + 0.010
+        _sled_mat_defs = [
+            (0.38,  'M_LED_Green'),
+            (0.12,  'M_LED_Amber'),
+            (-0.14, 'M_LED_Green'),
+        ]
+        _sled_bms: dict = {}
+        for lz_frac, mat in _sled_mat_defs:
+            lz = HH * lz_frac
+            if mat not in _sled_bms:
+                _sled_bms[mat] = bmesh.new()
+            _sw_box(_sled_bms[mat],
+                    SLED_CX - 0.0015, SLED_CX + 0.0015,
+                    FRONT_Y - 0.0025, FRONT_Y - 0.0005,
+                    lz - 0.0015, lz + 0.0015)
+        for mat, bm_s in _sled_bms.items():
+            suffix = mat.replace('M_LED_', '').lower()
+            parts.append(_sw_mesh_obj(f"{name}_sled_{suffix}", bm_s, col, mat))
+
+        # Front USB-A ports (×2) — annular frame + tunnel + tongue
+        bm_usb = bmesh.new()
+        USB_OW = 0.0130; USB_OH = 0.0060; USB_IW = 0.0100; USB_IH = 0.0035; USB_D = 0.0100
+        USB_CX = CTRL_CX - 0.008
+        USB_WALL = (USB_OW - USB_IW) / 2
+        for ui, USB_CZ in enumerate([-HH * 0.30, -HH * 0.52]):
+            FY = FRONT_Y - 0.0005  # front face of frame (slightly recessed)
+            BY = FY + USB_D         # back of tunnel
+            # Front face annular frame (4 rails)
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX + USB_OW/2,   # top
+                    FY - 0.0008, FY,
+                    USB_CZ + USB_IH/2, USB_CZ + USB_OH/2)
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX + USB_OW/2,   # bottom
+                    FY - 0.0008, FY,
+                    USB_CZ - USB_OH/2, USB_CZ - USB_IH/2)
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX - USB_IW/2,   # left
+                    FY - 0.0008, FY,
+                    USB_CZ - USB_OH/2, USB_CZ + USB_OH/2)
+            _sw_box(bm_usb, USB_CX + USB_IW/2, USB_CX + USB_OW/2,   # right
+                    FY - 0.0008, FY,
+                    USB_CZ - USB_OH/2, USB_CZ + USB_OH/2)
+            # Tunnel walls (top, bottom, left, right)
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX + USB_OW/2,
+                    FY, BY,
+                    USB_CZ + USB_IH/2, USB_CZ + USB_OH/2)
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX + USB_OW/2,
+                    FY, BY,
+                    USB_CZ - USB_OH/2, USB_CZ - USB_IH/2)
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX - USB_IW/2,
+                    FY, BY,
+                    USB_CZ - USB_OH/2, USB_CZ + USB_OH/2)
+            _sw_box(bm_usb, USB_CX + USB_IW/2, USB_CX + USB_OW/2,
+                    FY, BY,
+                    USB_CZ - USB_OH/2, USB_CZ + USB_OH/2)
+            # Back cap
+            _sw_box(bm_usb, USB_CX - USB_OW/2, USB_CX + USB_OW/2,
+                    BY - 0.0005, BY,
+                    USB_CZ - USB_OH/2, USB_CZ + USB_OH/2)
+            # Plastic tongue (upper half of inner cavity)
+            _sw_box(bm_usb, USB_CX - USB_IW/2 + 0.001, USB_CX + USB_IW/2 - 0.001,
+                    FY + 0.002, BY - 0.001,
+                    USB_CZ, USB_CZ + USB_IH/2 - 0.0003)
+        parts.append(_sw_mesh_obj(f"{name}_usb_front", bm_usb, col, 'M_PlasticDark'))
+
+        # ── Rear face ───────────────────────────────────────────────────
+        # Dual PSU blocks
+        PSU_W_EA = 0.078; PSU_GAP  = 0.006
+        PSU_X0_L = -HW + 0.003
+        PSU_X1_L = PSU_X0_L + PSU_W_EA
+        PSU_X0_R = PSU_X1_L + PSU_GAP
+        PSU_X1_R = PSU_X0_R + PSU_W_EA
+
+        bm_psu         = bmesh.new()
+        bm_psu_hdl     = bmesh.new()
+        bm_psu_exhaust = bmesh.new()
+        bm_psu_led     = bmesh.new()
+
+        # IEC C14 shared geometry for each PSU (bmesh per PSU to stay clean)
+        IEC_CUT_W_s = 0.0280; IEC_CUT_H_s = 0.0220
+        IEC_FLG_W_s = 0.0390; IEC_FLG_H_s = 0.0310
+        IEC_SOCK_D_s = 0.0200; IEC_FLG_T_s = 0.0025
+        S_WALL_s = 0.002
+
+        bm_iec_all  = bmesh.new()
+        bm_flg_all  = bmesh.new()
+        bm_iec_scr_all = bmesh.new()
+        bm_iec_con_all = bmesh.new()
+
+        def _build_iec_at(psu_cx_iec, psu_cz_iec):
+            """Build IEC C14 inlet geometry into shared bmeshes at given centre."""
+            CX_iec = psu_cx_iec; CZ_iec = psu_cz_iec
+            ox0_iec = CX_iec - IEC_FLG_W_s/2; ox1_iec = CX_iec + IEC_FLG_W_s/2
+            oz0_iec = CZ_iec - IEC_FLG_H_s/2; oz1_iec = CZ_iec + IEC_FLG_H_s/2
+            cx0_iec = CX_iec - IEC_CUT_W_s/2; cx1_iec = CX_iec + IEC_CUT_W_s/2
+            cz0_iec = CZ_iec - IEC_CUT_H_s/2; cz1_iec = CZ_iec + IEC_CUT_H_s/2
+            ix0_iec = cx0_iec + S_WALL_s;      ix1_iec = cx1_iec - S_WALL_s
+            iz0_iec = cz0_iec + S_WALL_s;      iz1_iec = cz1_iec - S_WALL_s
+            FLG_Y0_iec = BACK_Y; FLG_Y1_iec = BACK_Y + IEC_FLG_T_s
+            SOCK_Y1_iec = BACK_Y - IEC_SOCK_D_s
+
+            # Body
+            of_v = [bm_iec_all.verts.new((ox0_iec, FLG_Y0_iec, oz0_iec)),
+                    bm_iec_all.verts.new((ox1_iec, FLG_Y0_iec, oz0_iec)),
+                    bm_iec_all.verts.new((ox1_iec, FLG_Y0_iec, oz1_iec)),
+                    bm_iec_all.verts.new((ox0_iec, FLG_Y0_iec, oz1_iec))]
+            ob_v = [bm_iec_all.verts.new((ox0_iec, SOCK_Y1_iec, oz0_iec)),
+                    bm_iec_all.verts.new((ox1_iec, SOCK_Y1_iec, oz0_iec)),
+                    bm_iec_all.verts.new((ox1_iec, SOCK_Y1_iec, oz1_iec)),
+                    bm_iec_all.verts.new((ox0_iec, SOCK_Y1_iec, oz1_iec))]
+            cf_v = [bm_iec_all.verts.new((cx0_iec, FLG_Y0_iec, cz0_iec)),
+                    bm_iec_all.verts.new((cx1_iec, FLG_Y0_iec, cz0_iec)),
+                    bm_iec_all.verts.new((cx1_iec, FLG_Y0_iec, cz1_iec)),
+                    bm_iec_all.verts.new((cx0_iec, FLG_Y0_iec, cz1_iec))]
+            it_v = [bm_iec_all.verts.new((ix0_iec, FLG_Y0_iec, iz0_iec)),
+                    bm_iec_all.verts.new((ix1_iec, FLG_Y0_iec, iz0_iec)),
+                    bm_iec_all.verts.new((ix1_iec, FLG_Y0_iec, iz1_iec)),
+                    bm_iec_all.verts.new((ix0_iec, FLG_Y0_iec, iz1_iec))]
+            ib_v = [bm_iec_all.verts.new((ix0_iec, SOCK_Y1_iec, iz0_iec)),
+                    bm_iec_all.verts.new((ix1_iec, SOCK_Y1_iec, iz0_iec)),
+                    bm_iec_all.verts.new((ix1_iec, SOCK_Y1_iec, iz1_iec)),
+                    bm_iec_all.verts.new((ix0_iec, SOCK_Y1_iec, iz1_iec))]
+            _sw_F(bm_iec_all, [of_v[0], of_v[1], cf_v[1], cf_v[0]])
+            _sw_F(bm_iec_all, [of_v[3], cf_v[3], cf_v[2], of_v[2]])
+            _sw_F(bm_iec_all, [of_v[0], cf_v[0], cf_v[3], of_v[3]])
+            _sw_F(bm_iec_all, [of_v[1], of_v[2], cf_v[2], cf_v[1]])
+            _sw_F(bm_iec_all, [of_v[0], ob_v[0], ob_v[1], of_v[1]])
+            _sw_F(bm_iec_all, [of_v[3], of_v[2], ob_v[2], ob_v[3]])
+            _sw_F(bm_iec_all, [of_v[0], of_v[3], ob_v[3], ob_v[0]])
+            _sw_F(bm_iec_all, [of_v[1], ob_v[1], ob_v[2], of_v[2]])
+            _sw_F(bm_iec_all, [ob_v[0], ob_v[3], ob_v[2], ob_v[1]])
+            _sw_F(bm_iec_all, [cf_v[0], cf_v[1], it_v[1], it_v[0]])
+            _sw_F(bm_iec_all, [cf_v[3], it_v[3], it_v[2], cf_v[2]])
+            _sw_F(bm_iec_all, [cf_v[0], it_v[0], it_v[3], cf_v[3]])
+            _sw_F(bm_iec_all, [cf_v[1], cf_v[2], it_v[2], it_v[1]])
+            _sw_F(bm_iec_all, [it_v[0], it_v[1], ib_v[1], ib_v[0]])
+            _sw_F(bm_iec_all, [it_v[3], ib_v[3], ib_v[2], it_v[2]])
+            _sw_F(bm_iec_all, [it_v[0], ib_v[0], ib_v[3], it_v[3]])
+            _sw_F(bm_iec_all, [it_v[1], it_v[2], ib_v[2], ib_v[1]])
+            _sw_F(bm_iec_all, [ib_v[0], ib_v[1], ib_v[2], ib_v[3]])
+
+            # Flange
+            f0_v2 = [bm_flg_all.verts.new((ox0_iec, FLG_Y0_iec, oz0_iec)),
+                     bm_flg_all.verts.new((ox1_iec, FLG_Y0_iec, oz0_iec)),
+                     bm_flg_all.verts.new((ox1_iec, FLG_Y0_iec, oz1_iec)),
+                     bm_flg_all.verts.new((ox0_iec, FLG_Y0_iec, oz1_iec))]
+            f1_v2 = [bm_flg_all.verts.new((ox0_iec, FLG_Y1_iec, oz0_iec)),
+                     bm_flg_all.verts.new((ox1_iec, FLG_Y1_iec, oz0_iec)),
+                     bm_flg_all.verts.new((ox1_iec, FLG_Y1_iec, oz1_iec)),
+                     bm_flg_all.verts.new((ox0_iec, FLG_Y1_iec, oz1_iec))]
+            c0_v2 = [bm_flg_all.verts.new((cx0_iec, FLG_Y0_iec, cz0_iec)),
+                     bm_flg_all.verts.new((cx1_iec, FLG_Y0_iec, cz0_iec)),
+                     bm_flg_all.verts.new((cx1_iec, FLG_Y0_iec, cz1_iec)),
+                     bm_flg_all.verts.new((cx0_iec, FLG_Y0_iec, cz1_iec))]
+            c1_v2 = [bm_flg_all.verts.new((cx0_iec, FLG_Y1_iec, cz0_iec)),
+                     bm_flg_all.verts.new((cx1_iec, FLG_Y1_iec, cz0_iec)),
+                     bm_flg_all.verts.new((cx1_iec, FLG_Y1_iec, cz1_iec)),
+                     bm_flg_all.verts.new((cx0_iec, FLG_Y1_iec, cz1_iec))]
+            _sw_F(bm_flg_all, [f1_v2[0], f1_v2[1], c1_v2[1], c1_v2[0]])
+            _sw_F(bm_flg_all, [f1_v2[3], c1_v2[3], c1_v2[2], f1_v2[2]])
+            _sw_F(bm_flg_all, [f1_v2[0], c1_v2[0], c1_v2[3], f1_v2[3]])
+            _sw_F(bm_flg_all, [f1_v2[1], f1_v2[2], c1_v2[2], c1_v2[1]])
+            _sw_F(bm_flg_all, [f0_v2[0], c0_v2[0], c0_v2[1], f0_v2[1]])
+            _sw_F(bm_flg_all, [f0_v2[3], f0_v2[2], c0_v2[2], c0_v2[3]])
+            _sw_F(bm_flg_all, [f0_v2[0], f0_v2[3], c0_v2[3], c0_v2[0]])
+            _sw_F(bm_flg_all, [f0_v2[1], c0_v2[1], c0_v2[2], f0_v2[2]])
+            for i in range(4):
+                _sw_F(bm_flg_all, [f0_v2[i], f1_v2[i], f1_v2[(i+1)%4], f0_v2[(i+1)%4]])
+
+            # IEC screws (2 per inlet)
+            SR_iec = 0.002; ST_iec = 0.001; NS_iec = 12
+            for scx_iec in [CX_iec - (IEC_CUT_W_s/2 + (IEC_FLG_W_s/2 - IEC_CUT_W_s/2)/2),
+                            CX_iec + (IEC_CUT_W_s/2 + (IEC_FLG_W_s/2 - IEC_CUT_W_s/2)/2)]:
+                rim_b_v = []; rim_f_v = []
+                for i in range(NS_iec):
+                    a = 2 * math.pi * i / NS_iec
+                    rim_b_v.append(bm_iec_scr_all.verts.new((scx_iec + SR_iec*math.cos(a), FLG_Y1_iec,            CZ_iec + SR_iec*math.sin(a))))
+                    rim_f_v.append(bm_iec_scr_all.verts.new((scx_iec + SR_iec*math.cos(a), FLG_Y1_iec + ST_iec,   CZ_iec + SR_iec*math.sin(a))))
+                cf_iec = bm_iec_scr_all.verts.new((scx_iec, FLG_Y1_iec + ST_iec, CZ_iec))
+                for i in range(NS_iec):
+                    _sw_F(bm_iec_scr_all, [rim_b_v[i], rim_f_v[i], rim_f_v[(i+1)%NS_iec], rim_b_v[(i+1)%NS_iec]])
+                    try: bm_iec_scr_all.faces.new([cf_iec, rim_f_v[i], rim_f_v[(i+1)%NS_iec]])
+                    except: pass
+
+            # IEC contacts (E/L/N)
+            PY0_iec2 = SOCK_Y1_iec + 0.0005; PY1_iec2 = PY0_iec2 + 0.001
+            def _blade_psu(cx_b, cz_b, bw, bh):
+                _sw_box(bm_iec_con_all, cx_b - bw/2, cx_b + bw/2,
+                        PY0_iec2, PY1_iec2, cz_b - bh/2, cz_b + bh/2)
+            _blade_psu(CX_iec,            CZ_iec + 0.0055, 0.007,  0.005)
+            _blade_psu(CX_iec + 0.0075,   CZ_iec - 0.0045, 0.0038, 0.009)
+            _blade_psu(CX_iec - 0.0075,   CZ_iec - 0.0045, 0.0038, 0.009)
+
+        for psu_x0, psu_x1 in [(PSU_X0_L, PSU_X1_L), (PSU_X0_R, PSU_X1_R)]:
+            psu_cx_l = (psu_x0 + psu_x1) / 2
+
+            # PSU face plate — tiled around IEC C14 cutout opening
+            _fp_cx_iec = psu_cx_l
+            _fp_iz0 = -HH * 0.35 - IEC_CUT_H_s / 2
+            _fp_iz1 = -HH * 0.35 + IEC_CUT_H_s / 2
+            _fp_ix0 = _fp_cx_iec - IEC_CUT_W_s / 2
+            _fp_ix1 = _fp_cx_iec + IEC_CUT_W_s / 2
+            _fp_x0 = psu_x0 + 0.002;  _fp_x1 = psu_x1 - 0.002
+            _fp_z0 = -HH + 0.003;     _fp_z1 = HH - 0.003
+            _sw_box(bm_psu, _fp_x0,  _fp_ix0, BACK_Y, BACK_Y+0.002, _fp_z0, _fp_z1)   # left
+            _sw_box(bm_psu, _fp_ix1, _fp_x1,  BACK_Y, BACK_Y+0.002, _fp_z0, _fp_z1)   # right
+            _sw_box(bm_psu, _fp_ix0, _fp_ix1, BACK_Y, BACK_Y+0.002, _fp_z0, _fp_iz0)  # below IEC
+            _sw_box(bm_psu, _fp_ix0, _fp_ix1, BACK_Y, BACK_Y+0.002, _fp_iz1, _fp_z1)  # above IEC
+
+            # Handle bar at top
+            _sw_box(bm_psu_hdl, psu_x0 + 0.005, psu_x1 - 0.005,
+                    BACK_Y + 0.001, BACK_Y + 0.006,
+                    HH - 0.006, HH - 0.002)
+
+            # IEC C14 at each PSU
+            _build_iec_at(psu_cx_l, -HH * 0.35)
+
+            # Exhaust slots — confined between IEC top and handle bar
+            _IEC_CZ  = -HH * 0.35
+            _EX_Z0   = _IEC_CZ + IEC_CUT_H_s / 2 + 0.0030   # 3mm above IEC top
+            _EX_Z1   = HH - 0.0080                            # clear of handle bar
+            _N_EXHST = 5; _SL_H = 0.0011
+            _gap     = max(0.0006, (_EX_Z1 - _EX_Z0 - _N_EXHST * _SL_H) / (_N_EXHST - 1))
+            for ei in range(_N_EXHST):
+                ez = _EX_Z0 + ei * (_SL_H + _gap)
+                _sw_box(bm_psu_exhaust,
+                        psu_x0 + 0.006, psu_x1 - 0.006,
+                        BACK_Y + 0.0005, BACK_Y + 0.002,
+                        ez, ez + _SL_H)
+
+            # PSU LED
+            _sw_box(bm_psu_led,
+                    psu_cx_l + PSU_W_EA * 0.30, psu_cx_l + PSU_W_EA * 0.30 + 0.004,
+                    BACK_Y + 0.001, BACK_Y + 0.003,
+                    HH * 0.72, HH * 0.72 + 0.004)
+
+        parts.append(_sw_mesh_obj(f"{name}_psu_faces",    bm_psu,         col, 'M_Aluminum'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_handles",  bm_psu_hdl,     col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_body", bm_iec_all,     col, 'M_BlackMatte'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_flange", bm_flg_all,   col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_screws", bm_iec_scr_all, col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_contacts", bm_iec_con_all, col, 'M_Gold'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_exhaust",  bm_psu_exhaust, col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_leds",     bm_psu_led,     col, 'M_LED_Green'))
+
+        # PCIe bracket zone — fixed 46mm for 2 × 21mm brackets + margins
+        PCIE_X0     = PSU_X1_R + 0.008   # 8mm gap after right PSU
+        PCIE_W      = 0.046               # 2 slots × ~21mm + small margins
+        pcie_slot_w = (PCIE_W - 0.004) / 2   # ~21mm per slot
+
+        bm_pcie      = bmesh.new()
+        bm_pcie_screws = bmesh.new()
+
+        for si in range(2):
+            sx0 = PCIE_X0 + si * (pcie_slot_w + 0.004)
+            sx1 = sx0 + pcie_slot_w
+            scx_p = (sx0 + sx1) / 2
+
+            # Bracket face
+            _sw_box(bm_pcie, sx0 + 0.001, sx1 - 0.001,
+                    BACK_Y, BACK_Y + 0.0015,
+                    -HH + 0.002, HH - 0.003)
+
+            # Vent bars (10 horizontal)
+            for vi in range(10):
+                vz_p = -HH * 0.65 + vi * (h * 0.78 / 10)
+                _sw_box(bm_pcie, sx0 + 0.003, sx1 - 0.003,
+                        BACK_Y + 0.0002, BACK_Y + 0.0015,
+                        vz_p, vz_p + 0.0015)
+
+            # Retention screw (8-sided cap head, same pattern as ear screw)
+            SCR_R_P = 0.0022; SCR_T_P = 0.0018; SCR_Y_P = BACK_Y + 0.0030; SCR_SEG_P = 8
+            SCR_CZ_P = HH - 0.006
+            fvp = []; bvp = []
+            for i in range(SCR_SEG_P):
+                a = math.pi / SCR_SEG_P + 2 * math.pi * i / SCR_SEG_P
+                fvp.append(bm_pcie_screws.verts.new((scx_p + SCR_R_P * math.cos(a), SCR_Y_P,               SCR_CZ_P + SCR_R_P * math.sin(a))))
+                bvp.append(bm_pcie_screws.verts.new((scx_p + SCR_R_P * math.cos(a), SCR_Y_P + SCR_T_P,     SCR_CZ_P + SCR_R_P * math.sin(a))))
+            cfp = bm_pcie_screws.verts.new((scx_p, SCR_Y_P,               SCR_CZ_P))
+            cbp = bm_pcie_screws.verts.new((scx_p, SCR_Y_P + SCR_T_P,     SCR_CZ_P))
+            for i in range(SCR_SEG_P):
+                n = (i + 1) % SCR_SEG_P
+                _sw_F(bm_pcie_screws, [fvp[i], fvp[n], bvp[n], bvp[i]])
+                try: bm_pcie_screws.faces.new([cfp, fvp[n], fvp[i]])
+                except: pass
+                try: bm_pcie_screws.faces.new([cbp, bvp[i], bvp[n]])
+                except: pass
+
+        parts.append(_sw_mesh_obj(f"{name}_pcie_brackets", bm_pcie,        col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_pcie_screws",   bm_pcie_screws, col, 'M_DarkGrayMet'))
+
+        # Rear I/O cluster
+        IO_X0 = PCIE_X0 + PCIE_W + 0.006
+
+        # RJ45 port constants (rear-style — same as switch REAR_PORTS geometry)
+        RJ_OW = 0.0160; RJ_OH = 0.0130; RJ_WALL = 0.0014
+        RJ_IW = RJ_OW - 2 * RJ_WALL; RJ_IH = RJ_OH - 2 * RJ_WALL
+        RJ_CHAM = 0.00048
+        RJ_PROTRUDE = 0.00150
+        RJ_MOUTH_Y = BACK_Y + RJ_PROTRUDE
+        RJ_DEEP_Y  = RJ_MOUTH_Y - 0.0160
+
+        bm_io_rj   = bmesh.new()
+        bm_io_contacts = bmesh.new()
+        bm_io_usb_r = bmesh.new()
+        bm_io_misc = bmesh.new()
+
+        def _build_rear_rj45(px_r, pz_r):
+            py_mouth = RJ_MOUTH_Y; py_deep = RJ_DEEP_Y
+            py_iback = py_deep + RJ_WALL
+            om_r = [bm_io_rj.verts.new((px_r - RJ_OW/2, py_mouth, pz_r - RJ_OH/2)),
+                    bm_io_rj.verts.new((px_r + RJ_OW/2, py_mouth, pz_r - RJ_OH/2)),
+                    bm_io_rj.verts.new((px_r + RJ_OW/2, py_mouth, pz_r + RJ_OH/2)),
+                    bm_io_rj.verts.new((px_r - RJ_OW/2, py_mouth, pz_r + RJ_OH/2))]
+            im_r = [bm_io_rj.verts.new((px_r - RJ_IW/2 + RJ_CHAM, py_mouth, pz_r - RJ_IH/2 + RJ_CHAM)),
+                    bm_io_rj.verts.new((px_r + RJ_IW/2 - RJ_CHAM, py_mouth, pz_r - RJ_IH/2 + RJ_CHAM)),
+                    bm_io_rj.verts.new((px_r + RJ_IW/2 - RJ_CHAM, py_mouth, pz_r + RJ_IH/2 - RJ_CHAM)),
+                    bm_io_rj.verts.new((px_r - RJ_IW/2 + RJ_CHAM, py_mouth, pz_r + RJ_IH/2 - RJ_CHAM))]
+            od_r = [bm_io_rj.verts.new((px_r - RJ_OW/2, py_deep, pz_r - RJ_OH/2)),
+                    bm_io_rj.verts.new((px_r + RJ_OW/2, py_deep, pz_r - RJ_OH/2)),
+                    bm_io_rj.verts.new((px_r + RJ_OW/2, py_deep, pz_r + RJ_OH/2)),
+                    bm_io_rj.verts.new((px_r - RJ_OW/2, py_deep, pz_r + RJ_OH/2))]
+            ib_r = [bm_io_rj.verts.new((px_r - RJ_IW/2, py_iback, pz_r - RJ_IH/2)),
+                    bm_io_rj.verts.new((px_r + RJ_IW/2, py_iback, pz_r - RJ_IH/2)),
+                    bm_io_rj.verts.new((px_r + RJ_IW/2, py_iback, pz_r + RJ_IH/2)),
+                    bm_io_rj.verts.new((px_r - RJ_IW/2, py_iback, pz_r + RJ_IH/2))]
+            _sw_F(bm_io_rj, [om_r[0], om_r[1], im_r[1], im_r[0]])
+            _sw_F(bm_io_rj, [om_r[2], om_r[3], im_r[3], im_r[2]])
+            _sw_F(bm_io_rj, [om_r[3], om_r[0], im_r[0], im_r[3]])
+            _sw_F(bm_io_rj, [om_r[1], om_r[2], im_r[2], im_r[1]])
+            _sw_F(bm_io_rj, [om_r[0], od_r[0], od_r[1], om_r[1]])
+            _sw_F(bm_io_rj, [om_r[3], od_r[3], od_r[2], om_r[2]])
+            _sw_F(bm_io_rj, [om_r[3], om_r[0], od_r[0], od_r[3]])
+            _sw_F(bm_io_rj, [om_r[1], od_r[1], od_r[2], om_r[2]])
+            _sw_F(bm_io_rj, [od_r[0], od_r[3], od_r[2], od_r[1]])
+            _sw_F(bm_io_rj, [im_r[0], im_r[1], ib_r[1], ib_r[0]])
+            _sw_F(bm_io_rj, [im_r[2], im_r[3], ib_r[3], ib_r[2]])
+            _sw_F(bm_io_rj, [im_r[3], im_r[0], ib_r[0], ib_r[3]])
+            _sw_F(bm_io_rj, [im_r[1], im_r[2], ib_r[2], ib_r[1]])
+            _sw_F(bm_io_rj, [ib_r[0], ib_r[1], ib_r[2], ib_r[3]])
+            # Gold contact pins
+            pin_y0_r = py_iback + 0.0002; pin_y1_r = pin_y0_r + 0.0003
+            pin_z0_r = pz_r - RJ_IH / 2 + 0.001
+            sp_r = RJ_IW / 9
+            for pi_r in range(8):
+                ppx_r = (px_r - RJ_IW/2) + (pi_r + 1) * sp_r
+                _sw_box(bm_io_contacts, ppx_r - 0.0003, ppx_r + 0.0003,
+                        pin_y0_r, pin_y1_r, pin_z0_r, pin_z0_r + 0.0011)
+
+        # iDRAC + 2× LAN RJ45 — all at same height, evenly spaced horizontally
+        _build_rear_rj45(IO_X0 + 0.010, HH * 0.40)
+        _build_rear_rj45(IO_X0 + 0.030, HH * 0.40)
+        _build_rear_rj45(IO_X0 + 0.050, HH * 0.40)
+
+        # Bake contacts faces from raw boxes
+        bm_io_contacts.verts.ensure_lookup_table()
+        _n_io_contacts = len(bm_io_contacts.verts) // 8
+        for i in range(_n_io_contacts):
+            b = i * 8
+            vs_rc2 = bm_io_contacts.verts[b:b + 8]
+            for f_idx in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+                try: bm_io_contacts.faces.new([vs_rc2[j] for j in f_idx])
+                except: pass
+
+        # 2× rear USB-A
+        USB_OW_R = 0.0130; USB_OH_R = 0.0060; USB_IW_R = 0.0100; USB_IH_R = 0.0035; USB_D_R = 0.0100
+        USB_WALL_R = (USB_OW_R - USB_IW_R) / 2
+        USB_CX_R = IO_X0 + 0.078   # own column, clear of LAN ports
+        for ui_r, USB_CZ_R in enumerate([-HH * 0.15, -HH * 0.42]):
+            FY_R = BACK_Y + 0.0005   # opening face — slightly proud of rear wall
+            BY_R = FY_R - USB_D_R    # tunnel goes INTO chassis (toward -Y)
+            # Face frame strips — proud of rear wall at opening
+            _sw_box(bm_io_usb_r, USB_CX_R - USB_OW_R/2, USB_CX_R + USB_OW_R/2,
+                    FY_R, FY_R + 0.0008,
+                    USB_CZ_R + USB_IH_R/2, USB_CZ_R + USB_OH_R/2)
+            _sw_box(bm_io_usb_r, USB_CX_R - USB_OW_R/2, USB_CX_R + USB_OW_R/2,
+                    FY_R, FY_R + 0.0008,
+                    USB_CZ_R - USB_OH_R/2, USB_CZ_R - USB_IH_R/2)
+            _sw_box(bm_io_usb_r, USB_CX_R - USB_OW_R/2, USB_CX_R - USB_IW_R/2,
+                    FY_R, FY_R + 0.0008,
+                    USB_CZ_R - USB_OH_R/2, USB_CZ_R + USB_OH_R/2)
+            _sw_box(bm_io_usb_r, USB_CX_R + USB_IW_R/2, USB_CX_R + USB_OW_R/2,
+                    FY_R, FY_R + 0.0008,
+                    USB_CZ_R - USB_OH_R/2, USB_CZ_R + USB_OH_R/2)
+            # Tunnel walls — going inward (BY_R < FY_R)
+            for _wall_pair in [
+                (USB_CX_R - USB_OW_R/2, USB_CX_R + USB_OW_R/2, USB_CZ_R + USB_IH_R/2, USB_CZ_R + USB_OH_R/2),
+                (USB_CX_R - USB_OW_R/2, USB_CX_R + USB_OW_R/2, USB_CZ_R - USB_OH_R/2, USB_CZ_R - USB_IH_R/2),
+                (USB_CX_R - USB_OW_R/2, USB_CX_R - USB_IW_R/2, USB_CZ_R - USB_OH_R/2, USB_CZ_R + USB_OH_R/2),
+                (USB_CX_R + USB_IW_R/2, USB_CX_R + USB_OW_R/2, USB_CZ_R - USB_OH_R/2, USB_CZ_R + USB_OH_R/2),
+            ]:
+                _sw_box(bm_io_usb_r, _wall_pair[0], _wall_pair[1], BY_R, FY_R, _wall_pair[2], _wall_pair[3])
+            # Back cap at innermost end
+            _sw_box(bm_io_usb_r, USB_CX_R - USB_OW_R/2, USB_CX_R + USB_OW_R/2,
+                    BY_R, BY_R + 0.0005,
+                    USB_CZ_R - USB_OH_R/2, USB_CZ_R + USB_OH_R/2)
+            # Plastic tongue (upper half of inner cavity)
+            _sw_box(bm_io_usb_r, USB_CX_R - USB_IW_R/2 + 0.001, USB_CX_R + USB_IW_R/2 - 0.001,
+                    BY_R + 0.001, FY_R - 0.002,
+                    USB_CZ_R, USB_CZ_R + USB_IH_R/2 - 0.0003)
+
+        # VGA DE-15 rect — own column right of USB
+        _sw_box(bm_io_misc, IO_X0 + 0.098, IO_X0 + 0.129,
+                BACK_Y + 0.001, BACK_Y + 0.004,
+                HH * 0.25 - 0.0075, HH * 0.25 + 0.0075)
+
+        # DB9 serial rect — same X column as VGA, lower Z (6mm gap between them)
+        _sw_box(bm_io_misc, IO_X0 + 0.098, IO_X0 + 0.116,
+                BACK_Y + 0.001, BACK_Y + 0.004,
+                -HH * 0.58 - 0.005, -HH * 0.58 + 0.005)
+
+        parts.append(_sw_mesh_obj(f"{name}_rear_rj45_housings",  bm_io_rj,       col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_rear_rj45_contacts",  bm_io_contacts, col, 'M_Gold'))
+        parts.append(_sw_mesh_obj(f"{name}_usb_rear",            bm_io_usb_r,    col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_rear_io_misc",        bm_io_misc,     col, 'M_DarkGrayMet'))
+
+        # Rear exhaust grille (between PSUs and PCIe zone)
+        EXGRL_X0 = PSU_X1_R + 0.003
+        EXGRL_X1 = PCIE_X0 - 0.003
+        if EXGRL_X1 > EXGRL_X0:
+            bm_exhaust = bmesh.new()
+            N_EXGRL = 14
+            for ei in range(N_EXGRL):
+                ez_e = BAY_Z0 + ei * (BAY_ZONE_H / N_EXGRL)
+                _sw_box(bm_exhaust, EXGRL_X0, EXGRL_X1,
+                        BACK_Y, BACK_Y + 0.0012,
+                        ez_e, ez_e + BAY_ZONE_H / N_EXGRL - 0.0010)
+            parts.append(_sw_mesh_obj(f"{name}_rear_exhaust", bm_exhaust, col, 'M_DarkGrayMet'))
+
+        # ── Rear background panel — covers chassis rear where no faceplate exists ──
+        # Tiles around the RJ45 / USB connector openings; gap strips fill zones
+        # between PSUs and between PCIe and IO cluster.
+        bm_rear_bg = bmesh.new()
+        _RBG_Y0 = BACK_Y - 0.002;  _RBG_Y1 = BACK_Y   # 2mm wall thickness
+
+        def _rbg(x0, x1, z0, z1):
+            _sw_box(bm_rear_bg, x0, x1, _RBG_Y0, _RBG_Y1, z0, z1)
+
+        # Solid zone backgrounds (proud faceplates sit on top at BACK_Y)
+        _rbg(-HW,              PSU_X0_L,       -HH, HH)   # left edge strip
+        _rbg(PSU_X1_L,         PSU_X0_R,       -HH, HH)   # between PSUs
+        _rbg(PSU_X1_R,         PCIE_X0,        -HH, HH)   # exhaust grille zone
+        _rbg(PCIE_X0,          PCIE_X0+PCIE_W, -HH, HH)   # PCIe zone
+        _rbg(PCIE_X0 + PCIE_W, IO_X0,          -HH, HH)   # PCIe-to-IO gap
+
+        # PSU bays — background tiled around IEC openings (must leave IEC hole open)
+        for _psu_x0, _psu_x1 in [(PSU_X0_L, PSU_X1_L), (PSU_X0_R, PSU_X1_R)]:
+            _psu_cx = (_psu_x0 + _psu_x1) / 2
+            _bg_iz0 = -HH * 0.35 - IEC_CUT_H_s / 2
+            _bg_iz1 = -HH * 0.35 + IEC_CUT_H_s / 2
+            _bg_ix0 = _psu_cx - IEC_CUT_W_s / 2
+            _bg_ix1 = _psu_cx + IEC_CUT_W_s / 2
+            _rbg(_psu_x0, _bg_ix0, -HH, HH)         # left of IEC
+            _rbg(_bg_ix1, _psu_x1, -HH, HH)         # right of IEC
+            _rbg(_bg_ix0, _bg_ix1, -HH,     _bg_iz0) # below IEC
+            _rbg(_bg_ix0, _bg_ix1, _bg_iz1, HH)      # above IEC
+
+        # IO cluster background — tiled around connector openings
+        _RJ_Z0 = HH * 0.40 - RJ_OH / 2          # bottom of RJ45 opening
+        _RJ_Z1 = HH * 0.40 + RJ_OH / 2          # top of RJ45 opening
+
+        # X column boundaries
+        _C_A0  = IO_X0;            _C_A1  = IO_X0 + 0.002   # left margin
+        _C_R1a = IO_X0 + 0.002;    _C_R1b = IO_X0 + 0.018   # RJ45 #1
+        _C_G1a = IO_X0 + 0.018;    _C_G1b = IO_X0 + 0.022   # gap
+        _C_R2a = IO_X0 + 0.022;    _C_R2b = IO_X0 + 0.038   # RJ45 #2
+        _C_G2a = IO_X0 + 0.038;    _C_G2b = IO_X0 + 0.042   # gap
+        _C_R3a = IO_X0 + 0.042;    _C_R3b = IO_X0 + 0.058   # RJ45 #3
+        _C_Ga  = IO_X0 + 0.058;    _C_Gb  = IO_X0 + 0.0715  # gap to USB
+        _C_Ua  = IO_X0 + 0.0715;   _C_Ub  = IO_X0 + 0.0845  # USB column
+        _C_Ra  = IO_X0 + 0.0845;   _C_Rb  = HW              # rest to right edge
+
+        # Solid columns
+        for _cx0, _cx1 in [(_C_A0, _C_A1), (_C_G1a, _C_G1b), (_C_G2a, _C_G2b),
+                            (_C_Ga, _C_Gb), (_C_Ra, _C_Rb)]:
+            _rbg(_cx0, _cx1, -HH, HH)
+
+        # RJ45 columns — open at RJ45 z band
+        for _rx0, _rx1 in [(_C_R1a, _C_R1b), (_C_R2a, _C_R2b), (_C_R3a, _C_R3b)]:
+            _rbg(_rx0, _rx1, -HH,    _RJ_Z0)   # below hole
+            _rbg(_rx0, _rx1, _RJ_Z1, HH)       # above hole
+
+        # USB column — two holes at different Z positions
+        _U1Z0 = -HH * 0.15 - USB_OH_R / 2;   _U1Z1 = -HH * 0.15 + USB_OH_R / 2
+        _U2Z0 = -HH * 0.42 - USB_OH_R / 2;   _U2Z1 = -HH * 0.42 + USB_OH_R / 2
+        _rbg(_C_Ua, _C_Ub, -HH,   _U2Z0)   # below lower USB
+        _rbg(_C_Ua, _C_Ub, _U2Z1, _U1Z0)   # between USB ports
+        _rbg(_C_Ua, _C_Ub, _U1Z1, HH)      # above upper USB
+
+        parts.append(_sw_mesh_obj(f"{name}_rear_panel_bg", bm_rear_bg, col, 'M_Aluminum'))
+
+        # ── Translation: centred coords → equipment-origin convention ─────
+        # parts[0] is the chassis, already built in equipment-origin space
+        # (cy=d/2, cz=h/2) by _create_box_object. All new 1U geometry in
+        # parts[1:] was built in centred coords — translate those only.
+        tx, ty, tz = 0.0, d / 2, h / 2
+        for obj in parts[1:]:
+            me = obj.data
+            for v in me.vertices:
+                v.co.x += tx
+                v.co.y += ty
+                v.co.z += tz
+            me.update()
+            obj.hide_render = False
+        parts[0].hide_render = False   # chassis
+
+        # ── Mounting ears — built in equipment-origin space ───────────────
+        ear_w_1u = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
+        ear_d_1u = 0.002
+        ear_h_dim_1u = h * 0.68
+        for side_sign in (-1, 1):
+            side_label = 'L' if side_sign < 0 else 'R'
+            ear_cx_1u = side_sign * (w / 2 + ear_w_1u / 2)
+            bm_ear = bmesh.new()
+            _sw_box(bm_ear,
+                    ear_cx_1u - ear_w_1u / 2, ear_cx_1u + ear_w_1u / 2,
+                    -ear_d_1u, 0.0,
+                    (h - ear_h_dim_1u) / 2, (h + ear_h_dim_1u) / 2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_{side_label}", bm_ear, col, 'M_Aluminum'))
+
+            # M6 rack screw — 8-sided cap head + Phillips cross
+            SCR_R_1u   = 0.0038
+            SCR_T_1u   = 0.0028
+            SCR_Y_1u   = -(ear_d_1u + 0.0010)
+            SCR_Z_1u   = h / 2
+            SCR_SEG_1u = 8
+            bm_scr_1u  = bmesh.new()
+            fv_1u = []; bv_1u = []
+            for i in range(SCR_SEG_1u):
+                a = math.pi / SCR_SEG_1u + 2 * math.pi * i / SCR_SEG_1u
+                fv_1u.append(bm_scr_1u.verts.new((ear_cx_1u + SCR_R_1u * math.cos(a), SCR_Y_1u,               SCR_Z_1u + SCR_R_1u * math.sin(a))))
+                bv_1u.append(bm_scr_1u.verts.new((ear_cx_1u + SCR_R_1u * math.cos(a), SCR_Y_1u + SCR_T_1u,    SCR_Z_1u + SCR_R_1u * math.sin(a))))
+            cf_1u = bm_scr_1u.verts.new((ear_cx_1u, SCR_Y_1u,               SCR_Z_1u))
+            cb_1u = bm_scr_1u.verts.new((ear_cx_1u, SCR_Y_1u + SCR_T_1u,    SCR_Z_1u))
+            for i in range(SCR_SEG_1u):
+                n = (i + 1) % SCR_SEG_1u
+                _sw_F(bm_scr_1u, [fv_1u[i], fv_1u[n], bv_1u[n], bv_1u[i]])
+                try: bm_scr_1u.faces.new([cf_1u, fv_1u[n], fv_1u[i]])
+                except: pass
+                try: bm_scr_1u.faces.new([cb_1u, bv_1u[i], bv_1u[n]])
+                except: pass
+            # Phillips cross grooves
+            GRV_1u = 0.0006; GRL_1u = SCR_R_1u * 1.6
+            _sw_box(bm_scr_1u, ear_cx_1u - GRL_1u/2, ear_cx_1u + GRL_1u/2,
+                    SCR_Y_1u - 0.0003, SCR_Y_1u, SCR_Z_1u - GRV_1u/2, SCR_Z_1u + GRV_1u/2)
+            _sw_box(bm_scr_1u, ear_cx_1u - GRV_1u/2, ear_cx_1u + GRV_1u/2,
+                    SCR_Y_1u - 0.0003, SCR_Y_1u, SCR_Z_1u - GRL_1u/2, SCR_Z_1u + GRL_1u/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_screw_{side_label}", bm_scr_1u, col, 'M_DarkGrayMet'))
+
+        # ── Optional join ─────────────────────────────────────────────────
+        if join_mesh:
+            joined_1u = _join_parts(parts, name)
+            bpy.ops.object.select_all(action='DESELECT')
+            joined_1u.select_set(True)
+            bpy.context.view_layer.objects.active = joined_1u
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.object.mode_set(mode='OBJECT')
 
     elif u_size <= 3:
         # ── 2U / 3U front face ────────────────────────────────────────────
@@ -881,13 +1508,13 @@ def create_server_chassis(
                         cz=nz + nvme_slot_h * 0.35,
                         w=0.003, d=0.001, h=0.002, collection=col))
 
-    # ── Mounting ears — always present at all quality levels ───────────────
+    # ── Mounting ears — 2U+ only (1U builds its own hero ears above) ─────────
     # Total panel = 482.6 mm; body = 446 mm; each ear = (482.6 - 446) / 2 = 18.3 mm
     ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2   # 18.3 mm
     ear_d = 0.002   # 2 mm deep
     ear_h = h * 0.68
 
-    for side_sign in (-1, 1):
+    for side_sign in (-1, 1) if u_size != 1 else ():
         side_label = 'L' if side_sign < 0 else 'R'
         ear_cx = side_sign * (w / 2 + ear_w / 2)
 
@@ -932,9 +1559,10 @@ def create_server_chassis(
                             h=0.0010 if dim == "H" else 0.0035,
                             collection=col))
 
-    if qf["vents"]:
-        # ── Side ventilation slots (horizontal louvre strips) ─────────────
-        _base_vents = 4 if u_size == 1 else 6
+    if qf["vents"] and u_size != 1:
+        # ── Side ventilation slots (horizontal louvre strips) — 2U+ only ──
+        # 1U hero model builds its own louvers in the centred-coord block above.
+        _base_vents = 6
         vent_count  = _base_vents * 2 if qf.get("high_poly_grilles") else _base_vents
         vent_h_dim  = max(0.002, h * (0.022 if qf.get("high_poly_grilles") else 0.038))
         vent_d_len  = d * 0.55
@@ -1195,8 +1823,8 @@ def create_server_chassis(
             cx=0.0, cy=d + 0.015, cz=h - 0.006,
             w=w * 0.84, d=0.008, h=0.005, collection=col))
 
-    # ── Hero: chamfer strips at key chassis edges (proper_bevels) ────────────
-    if qf.get("proper_bevels"):
+    # ── Hero: chamfer strips at key chassis edges (proper_bevels) — 2U+ ─────
+    if qf.get("proper_bevels") and u_size != 1:
         bevel_t = 0.0015   # 1.5 mm chamfer strip thickness
         # Top-front edge
         parts.append(_create_box_object(f"{name}_bvl_top_front",
@@ -1211,8 +1839,13 @@ def create_server_chassis(
             cx=0.0, cy=d + bevel_t / 2, cz=h - bevel_t / 2,
             w=w - 0.004, d=bevel_t, h=bevel_t, collection=col))
 
-    # ── Join + origin ──────────────────────────────────────────────────────
-    joined = _join_parts(parts, name)
+    # ── Join + origin ─────────────────────────────────────────────────────
+    # 1U handles its own join inside the u_size==1 block (respecting join_mesh).
+    # 2U+ always join here.
+    if u_size == 1:
+        joined = parts[0] if parts else None
+    else:
+        joined = _join_parts(parts, name)
 
     # ── Per-server material variation ─────────────────────────────────────
     # Always applied: keeps each chassis slightly unique even without full
