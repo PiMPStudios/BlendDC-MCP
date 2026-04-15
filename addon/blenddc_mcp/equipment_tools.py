@@ -260,19 +260,22 @@ def _sw_ensure_materials() -> None:
         else:
             nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
 
-    _pbr('M_Aluminum',    (0.82, 0.82, 0.80), metallic=1.0, roughness=0.12)
+    _pbr('M_Aluminum',    (0.66, 0.66, 0.66), metallic=1.0, roughness=0.15)
+    _pbr('M_Black',       (0.02, 0.02, 0.02), metallic=0.0, roughness=0.80)
     _pbr('M_BlackMatte',  (0.04, 0.04, 0.04), metallic=0.0, roughness=0.80)
-    _pbr('M_DarkGrayMet', (0.12, 0.12, 0.13), metallic=0.8, roughness=0.30)
-    _pbr('M_PlasticDark', (0.08, 0.10, 0.12), metallic=0.0, roughness=0.60)
-    _pbr('M_Gold',        (1.00, 0.78, 0.28), metallic=1.0, roughness=0.15)
-    _pbr('M_SFPCage',     (0.18, 0.18, 0.19), metallic=0.9, roughness=0.20)
+    _pbr('M_DarkGrayMet', (0.12, 0.12, 0.13), metallic=0.85, roughness=0.28)
+    _pbr('M_PlasticDark', (0.072, 0.078, 0.085), metallic=0.0, roughness=0.65)
+    _pbr('M_Gold',        (0.82, 0.67, 0.22), metallic=1.0, roughness=0.12)
+    _pbr('M_SFPCage',     (0.48, 0.50, 0.52), metallic=0.9, roughness=0.20)
     _pbr('M_PortVoid',    (0.01, 0.01, 0.01), metallic=0.0, roughness=0.95)
-    _pbr('M_Display',     (0.05, 0.30, 0.70), metallic=0.0, roughness=0.05)
-    _pbr('M_LED_Green',   (0.10, 1.00, 0.10), metallic=0.0, roughness=0.30,
-          emission=(0.10, 1.00, 0.10), strength=8.0)
-    _pbr('M_LED_Amber',   (1.00, 0.55, 0.02), metallic=0.0, roughness=0.30,
-          emission=(1.00, 0.55, 0.02), strength=8.0)
-    _pbr('M_LED_Off',     (0.06, 0.06, 0.06), metallic=0.0, roughness=0.50)
+    _pbr('M_Display',     (0.003, 0.039, 0.093), metallic=0.0, roughness=0.02)
+    _pbr('M_LED_Green',   (0.007, 0.150, 0.027), metallic=0.0, roughness=0.25,
+          emission=(0.007, 0.150, 0.027), strength=8.0)
+    _pbr('M_LED_Amber',   (0.150, 0.078, 0.003), metallic=0.0, roughness=0.25,
+          emission=(0.150, 0.078, 0.003), strength=8.0)
+    _pbr('M_LED_Off',     (0.040, 0.070, 0.040), metallic=0.0, roughness=0.55)
+    _pbr('M_LED_White',   (0.90, 0.90, 0.90), metallic=0.0, roughness=0.20,
+          emission=(0.90, 0.90, 0.90), strength=3.0)
 
 
 # ── Tool 1: create_server_chassis ─────────────────────────────────────────
@@ -1619,6 +1622,22 @@ def create_network_switch(
                     RY0_sfp, RY1_sfp, za, zb)
     parts.append(_sw_mesh_obj(f"{name}_sfp_rails", bm_rails, col, 'M_DarkGrayMet'))
 
+    # SFP bails — small retention clips on front lip of each cage
+    BAIL_T = 0.00120; BAIL_H = 0.00400; BAIL_D = 0.00300
+    bm_bail = bmesh.new()
+    for x0, x1, z0, z1 in SFP_CAGES_DEF:
+        cx_sfp = (x0 + x1) / 2
+        cz_top = z1
+        # horizontal tab across top of cage mouth
+        _sw_box(bm_bail, x0 + 0.001, x1 - 0.001,
+                SFP_MOUTH_Y - BAIL_D, SFP_MOUTH_Y,
+                cz_top, cz_top + BAIL_T)
+        # small pull-tab finger loop
+        _sw_box(bm_bail, cx_sfp - 0.003, cx_sfp + 0.003,
+                SFP_MOUTH_Y - BAIL_D, SFP_MOUTH_Y - BAIL_D + BAIL_T,
+                cz_top + BAIL_T, cz_top + BAIL_T + BAIL_H)
+    parts.append(_sw_mesh_obj(f"{name}_sfp_bails", bm_bail, col, 'M_Black'))
+
     # ─────────────────────────────────────────────────────────────────────
     # FANS: shroud ring + 7 swept blades + hub cylinder + duct box
     # ─────────────────────────────────────────────────────────────────────
@@ -1897,22 +1916,37 @@ def create_network_switch(
     _sw_box(bm_disp_bz, DX0 - 0.003, DX1 + 0.003,
             PY_disp, PY_disp + 0.004,
             DZ0 - 0.003, DZ1 + 0.003)
-    parts.append(_sw_mesh_obj(f"{name}_display_bezel", bm_disp_bz, col, 'M_BlackMatte'))
+    parts.append(_sw_mesh_obj(f"{name}_display_bezel", bm_disp_bz, col, 'M_Black'))
     bm_disp_sc = bmesh.new()
     _sw_box(bm_disp_sc, DX0, DX1, PY_disp, PY_disp + 0.0015, DZ0, DZ1)
     parts.append(_sw_mesh_obj(f"{name}_display_screen", bm_disp_sc, col, 'M_Display'))
 
+    # Status indicator LEDs (SYS / PWR / POE / ALT) — 4 small squares right of display
+    SLED_Y = FRONT_Y - 0.0003
+    SLED_W = 0.0030; SLED_H = 0.0030; SLED_D = 0.0008
+    sled_defs = [
+        ('sys', DX1 + 0.0060, 0.0080, 'M_LED_White'),
+        ('pwr', DX1 + 0.0060, 0.0040, 'M_LED_Green'),
+        ('poe', DX1 + 0.0060, 0.0000, 'M_LED_Amber'),
+        ('alt', DX1 + 0.0060, -0.0040, 'M_LED_Off'),
+    ]
+    for sled_label, sx, sz, smat in sled_defs:
+        bm_sl = bmesh.new()
+        _sw_box(bm_sl, sx - SLED_W/2, sx + SLED_W/2, SLED_Y - SLED_D, SLED_Y,
+                sz - SLED_H/2, sz + SLED_H/2)
+        parts.append(_sw_mesh_obj(f"{name}_sled_{sled_label}", bm_sl, col, smat))
+
     # ─────────────────────────────────────────────────────────────────────
-    # TOP LOUVERS
+    # TOP LOUVERS — low-profile vent slits spanning most of chassis width
+    # 3 mm tall, 1 mm wide, 8 mm pitch, runs front-to-back (Y)
     # ─────────────────────────────────────────────────────────────────────
-    LOUVER_W = 0.001; LOUVER_GAP = 0.003; N_LOUVERS = 18
-    for side_off in [0.0, 0.08]:
-        bm_louv = bmesh.new()
-        START_X_L = -0.05
-        for i in range(N_LOUVERS):
-            lx = START_X_L + side_off + i * (LOUVER_W + LOUVER_GAP)
-            _sw_box(bm_louv, lx, lx + LOUVER_W, -0.05, 0.05, HH, HH + 0.012)
-        parts.append(_sw_mesh_obj(f"{name}_top_louvers_{int(side_off*100)}", bm_louv, col, 'M_DarkGrayMet'))
+    LOUVER_W = 0.001; LOUVER_GAP = 0.007; LOUVER_H = 0.003
+    N_LOUVERS = 46; START_X_L = -0.190
+    bm_louv = bmesh.new()
+    for i in range(N_LOUVERS):
+        lx = START_X_L + i * (LOUVER_W + LOUVER_GAP)
+        _sw_box(bm_louv, lx, lx + LOUVER_W, -0.110, 0.110, HH, HH + LOUVER_H)
+    parts.append(_sw_mesh_obj(f"{name}_top_louvers", bm_louv, col, 'M_DarkGrayMet'))
 
     # ─────────────────────────────────────────────────────────────────────
     # SIDE VENTS
@@ -1927,7 +1961,7 @@ def create_network_switch(
             x1_v = x_pos           if x_pos > 0 else x_pos + VENT_W
             _sw_box(bm_vent, x0_v, x1_v, -0.04, 0.04, vz, vz + VENT_H_sv)
         side_label = 'R' if x_pos > 0 else 'L'
-        parts.append(_sw_mesh_obj(f"{name}_side_vents_{side_label}", bm_vent, col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_side_vents_{side_label}", bm_vent, col, 'M_Black'))
 
     # ─────────────────────────────────────────────────────────────────────
     # TRANSLATE all vertices: centred coords → equipment-origin convention
