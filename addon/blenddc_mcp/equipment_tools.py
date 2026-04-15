@@ -1340,11 +1340,12 @@ def create_network_switch(
     _sw_ensure_materials()
 
     # ── RJ45 port constants ────────────────────────────────────────────────
-    OW, OH  = 0.01600, 0.01180
+    PW      = 0.01200               # port pitch width (layout spacing)
+    OW, OH  = 0.01600, 0.01180      # outer shell W / H (3D geometry)
     OD      = 0.01600
     WALL    = 0.00140
-    IW      = OW - 2 * WALL       # 0.01320
-    IH      = OH - 2 * WALL       # 0.00900
+    IW      = OW - 2 * WALL        # 0.01320
+    IH      = OH - 2 * WALL        # 0.00900
     CHAM    = 0.00048
     PORT_PROTRUDE = 0.00150
     PORT_FRONT_Y  = FRONT_Y - PORT_PROTRUDE   # -0.14150
@@ -1354,7 +1355,7 @@ def create_network_switch(
     G_SIZE  = 6
     N_GROUPS = 4 if port_count >= 48 else 2
     PORT_ZONE_CX = 0.0115
-    single_grp_w  = G_SIZE * OW + (G_SIZE - 1) * GAP_X
+    single_grp_w  = G_SIZE * PW + (G_SIZE - 1) * GAP_X   # uses PW not OW
     total_ports_w = N_GROUPS * single_grp_w + (N_GROUPS - 1) * GRP_GAP
     port_left_edge = PORT_ZONE_CX - total_ports_w / 2
 
@@ -1423,8 +1424,9 @@ def create_network_switch(
     for g in range(N_GROUPS):
         gx = port_left_edge + g * (single_grp_w + GRP_GAP)
         for p in range(G_SIZE):
-            x0 = gx + p * (OW + GAP_X)
-            x1 = x0 + OW
+            cx = gx + p * (PW + GAP_X) + PW / 2   # centre using PW pitch
+            x0 = cx - OW / 2                        # hole sized to OW
+            x1 = cx + OW / 2
             fp_holes += [
                 (x0, x1, Z_UPPER - OH/2, Z_UPPER + OH/2),
                 (x0, x1, Z_LOWER - OH/2, Z_LOWER + OH/2),
@@ -1446,7 +1448,7 @@ def create_network_switch(
     for g in range(N_GROUPS):
         gx = port_left_edge + g * (single_grp_w + GRP_GAP)
         for p in range(G_SIZE):
-            px = gx + p * (OW + GAP_X) + OW / 2
+            px = gx + p * (PW + GAP_X) + PW / 2   # centre using PW pitch
             for pz in [Z_UPPER, Z_LOWER]:
                 py0 = PORT_FRONT_Y
                 py1 = PORT_FRONT_Y + OD
@@ -1515,7 +1517,7 @@ def create_network_switch(
     for g in range(N_GROUPS):
         gx = port_left_edge + g * (single_grp_w + GRP_GAP)
         for p in range(G_SIZE):
-            px = gx + p * (OW + GAP_X) + OW / 2
+            px = gx + p * (PW + GAP_X) + PW / 2   # PW pitch
             for pz in [Z_UPPER, Z_LOWER]:
                 lz = pz + LED_Z_OFFSET
                 ly = PORT_FRONT_Y - 0.0002
