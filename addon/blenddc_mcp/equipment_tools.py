@@ -2101,6 +2101,33 @@ def create_network_switch(
                 (h - ear_h_dim)/2, (h + ear_h_dim)/2)
         parts.append(_sw_mesh_obj(f"{name}_ear_{side_label}", bm_ear, col, 'M_Aluminum'))
 
+        # M6 rack screw — 8-sided cap head + Phillips cross, centered on ear
+        SCR_R   = 0.0038              # 7.6mm diam head (M6 pan head)
+        SCR_T   = 0.0028              # 2.8mm head thickness
+        SCR_Y   = -(ear_d + 0.0010)  # 1mm proud of outer ear face (Y = -ear_d)
+        SCR_Z   = h / 2              # vertically centred on chassis
+        SCR_SEG = 8
+        bm_scr  = bmesh.new()
+        fv = []; bv = []
+        for i in range(SCR_SEG):
+            a = math.pi / SCR_SEG + 2 * math.pi * i / SCR_SEG  # flat-top orientation
+            fv.append(bm_scr.verts.new((ear_cx + SCR_R*math.cos(a), SCR_Y,         SCR_Z + SCR_R*math.sin(a))))
+            bv.append(bm_scr.verts.new((ear_cx + SCR_R*math.cos(a), SCR_Y + SCR_T, SCR_Z + SCR_R*math.sin(a))))
+        cf = bm_scr.verts.new((ear_cx, SCR_Y,         SCR_Z))
+        cb = bm_scr.verts.new((ear_cx, SCR_Y + SCR_T, SCR_Z))
+        for i in range(SCR_SEG):
+            n = (i + 1) % SCR_SEG
+            _sw_F(bm_scr, [fv[i], fv[n], bv[n], bv[i]])
+            try: bm_scr.faces.new([cf, fv[n], fv[i]])
+            except: pass
+            try: bm_scr.faces.new([cb, bv[i], bv[n]])
+            except: pass
+        # Phillips cross grooves (two thin raised bars on outer face)
+        GRV = 0.0006; GRL = SCR_R * 1.6
+        _sw_box(bm_scr, ear_cx - GRL/2, ear_cx + GRL/2, SCR_Y - 0.0003, SCR_Y, SCR_Z - GRV/2, SCR_Z + GRV/2)
+        _sw_box(bm_scr, ear_cx - GRV/2, ear_cx + GRV/2, SCR_Y - 0.0003, SCR_Y, SCR_Z - GRL/2, SCR_Z + GRL/2)
+        parts.append(_sw_mesh_obj(f"{name}_ear_screw_{side_label}", bm_scr, col, 'M_DarkGrayMet'))
+
     # ─────────────────────────────────────────────────────────────────────
     # JOIN or PARENT
     # ─────────────────────────────────────────────────────────────────────
