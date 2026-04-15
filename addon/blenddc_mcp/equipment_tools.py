@@ -1153,13 +1153,16 @@ def create_network_switch(
 
     Front face layout (left → right):
       Control zone  ~40 mm : status LED column (SYS/POE/LNK/ACT) + mode button
-                             + console RJ45 + USB-A port + power LED dot
+                             + console RJ45 (hero: hollow + gold pins) + USB-A + power LED
       Port zone    ~340 mm : 2 rows × 12 cols (24p) or 2 rows × 24 cols (48p)
-                             RJ45 cage faces with group dividers and LED bars
-      SFP zone      ~56 mm : 4 × SFP+ cages in 2×2 arrangement with LED dots
+                             RJ45 cage faces with group dividers, LED bars,
+                             and hero-quality 8-pin gold contact arrays per port
+      SFP zone      ~56 mm : 4 × SFP+ cages in 2×2 arrangement, 37 mm deep,
+                             hero: 2×10 gold contact grid at cage rear, LED dots
 
     Rear face: 4 × 80 mm fan exhausts (ring + blade bars) centred in width,
-               C14 IEC power inlet (right), service/stack connector (left).
+               C14 IEC power inlet with hero-quality 3-contact + 2-screw detail (right),
+               service/stack connector (left).
 
     Proud-geometry depth illusion: port cage faces project −Y from a recessed
     background plate; rear fans use ring + bar layering.
@@ -1169,6 +1172,7 @@ def create_network_switch(
     port_count:       front-face data ports (24 or 48)
     collection_name:  Blender collection
     random_variation: randomize subtle material and jitter variation per unit
+    quality:          "hero" adds gold pins, SFP contacts, C14 blade contacts, and screws
     """
     # ── Quality flags ─────────────────────────────────────────────────────
     qf = QUALITY_TIERS.get(quality, QUALITY_TIERS["high"])
@@ -1300,6 +1304,34 @@ def create_network_switch(
                     collection=col)
                 _inn.data.materials.append(_port_dark)
                 parts.append(_inn)
+                # Hero: 8 gold spring-contact pins at top of opening
+                if qf.get("led_emissive"):   # led_emissive is hero-only
+                    _rj_gold = bpy.data.materials.get(f"{name}_rj_gold")
+                    if not _rj_gold:
+                        _rj_gold = bpy.data.materials.new(f"{name}_rj_gold")
+                        _rj_gold.use_nodes = True
+                        _rgn = _rj_gold.node_tree.nodes.get("Principled BSDF")
+                        if _rgn:
+                            _rgn.inputs["Base Color"].default_value  = (1.0, 0.78, 0.28, 1.0)
+                            _rgn.inputs["Metallic"].default_value    = 1.0
+                            _rgn.inputs["Roughness"].default_value   = 0.12
+                    n_pins   = 8
+                    pin_zone_w = PORT_SLOT_W - 0.0020
+                    pin_w    = pin_zone_w / n_pins
+                    pin_gap  = 0.0003
+                    pin_h    = PORT_SLOT_H * 0.55   # occupy upper ~55% of opening
+                    pin_z    = row_z + PORT_SLOT_H * 0.12  # centred in upper area
+                    pin_y    = INN_CY - 0.0010     # just proud of the inner face
+                    pin_x0   = px - pin_zone_w / 2
+                    for pi in range(n_pins):
+                        pin_cx = pin_x0 + pi * pin_w + pin_w / 2
+                        _pin = _create_box_object(
+                            f"{name}_p_{port_idx:02d}_pin_{pi}",
+                            cx=pin_cx, cy=pin_y, cz=pin_z,
+                            w=pin_w - pin_gap, d=0.0008, h=pin_h,
+                            collection=col)
+                        _pin.data.materials.append(_rj_gold)
+                        parts.append(_pin)
 
         # ── LED indicators ────────────────────────────────────────────────
         led_dot_h = h * 0.028
@@ -1351,13 +1383,40 @@ def create_network_switch(
                 parts.append(_create_box_object(f"{name}_sfp_{row_i}_{ci}_br",
                     cx=sfp_x + sw / 2 + BZ_SFP / 2, cy=BZ_CY, cz=sfp_z,
                     w=BZ_SFP, d=BZ_D, h=sh, collection=col))
-                # Recessed inner face — SFP cage is deep (14 mm), dark interior
+                # Recessed inner face — SFP cage is 37 mm deep (real transceiver insertion depth)
                 _sfp_inn = _create_box_object(f"{name}_sfp_{row_i}_{ci}_inn",
-                    cx=sfp_x, cy=0.0140, cz=sfp_z,
+                    cx=sfp_x, cy=0.0370, cz=sfp_z,
                     w=sw - 0.0010, d=0.0030, h=sh - 0.0010,
                     collection=col)
                 _sfp_inn.data.materials.append(_port_dark)
                 parts.append(_sfp_inn)
+                # Hero: 2×10 gold contact grid at cage rear (visible through opening)
+                if qf.get("led_emissive"):   # led_emissive is hero-only
+                    _gold_mat = bpy.data.materials.get(f"{name}_sfp_gold")
+                    if not _gold_mat:
+                        _gold_mat = bpy.data.materials.new(f"{name}_sfp_gold")
+                        _gold_mat.use_nodes = True
+                        _gn = _gold_mat.node_tree.nodes.get("Principled BSDF")
+                        if _gn:
+                            _gn.inputs["Base Color"].default_value  = (1.0, 0.78, 0.28, 1.0)
+                            _gn.inputs["Metallic"].default_value    = 1.0
+                            _gn.inputs["Roughness"].default_value   = 0.12
+                    n_con_rows, n_con_cols = 2, 10
+                    con_w = (sw - 0.003) / n_con_cols
+                    con_h = (sh - 0.004) / n_con_rows
+                    con_gap = 0.0004
+                    con_y   = 0.0350   # just in front of inner back face
+                    for cr in range(n_con_rows):
+                        for cc in range(n_con_cols):
+                            cx_c = sfp_x - (sw - 0.003) / 2 + cc * con_w + con_w / 2
+                            cz_c = sfp_z - (sh - 0.004) / 2 + cr * con_h + con_h / 2
+                            _con = _create_box_object(
+                                f"{name}_sfp_{row_i}_{ci}_con_{cr}_{cc}",
+                                cx=cx_c, cy=con_y, cz=cz_c,
+                                w=con_w - con_gap, d=0.0008, h=con_h - con_gap,
+                                collection=col)
+                            _con.data.materials.append(_gold_mat)
+                            parts.append(_con)
                 # LED dot above each SFP cage
                 if qf["bezel"]:
                     parts.append(_create_box_object(
@@ -1391,10 +1450,48 @@ def create_network_switch(
                     cx=led_col_x, cy=-0.0032, cz=lz,
                     w=0.004, d=0.003, h=0.004, collection=col))
 
-            # Console RJ45 opening (rectangular cage face, slightly proud)
-            parts.append(_create_box_object(f"{name}_console",
-                cx=CTRL_CX + 0.002, cy=-0.0048, cz=h * 0.50,
-                w=0.012, d=0.004, h=0.009, collection=col))
+            # Console RJ45 — 4-strip open frame (matches data port style)
+            _c_cx = CTRL_CX + 0.002
+            _c_cz = h * 0.50
+            _cw, _ch = 0.012, 0.009
+            _cbz = 0.0016    # border strip width
+            _cbd = 0.0025    # border strip depth
+            _cby = -0.0032   # slightly proud
+            for _strip, _kw, _kh, _ko_x, _ko_z in [
+                ("ct", _cw + _cbz * 2, _cbz, 0.0,          _ch / 2 + _cbz / 2),
+                ("cb", _cw + _cbz * 2, _cbz, 0.0,         -_ch / 2 - _cbz / 2),
+                ("cl", _cbz,           _ch,  -_cw / 2 - _cbz / 2, 0.0),
+                ("cr", _cbz,           _ch,   _cw / 2 + _cbz / 2, 0.0),
+            ]:
+                parts.append(_create_box_object(f"{name}_console_{_strip}",
+                    cx=_c_cx + _ko_x, cy=_cby, cz=_c_cz + _ko_z,
+                    w=_kw, d=_cbd, h=_kh, collection=col))
+            # Dark recessed interior
+            _c_inn = _create_box_object(f"{name}_console_inn",
+                cx=_c_cx, cy=0.0070, cz=_c_cz,
+                w=_cw - 0.0010, d=0.0025, h=_ch - 0.0010, collection=col)
+            _c_inn.data.materials.append(_port_dark)
+            parts.append(_c_inn)
+            # Hero: 8 gold pins
+            if qf.get("led_emissive"):
+                _rj_gold_c = bpy.data.materials.get(f"{name}_rj_gold")
+                if not _rj_gold_c:
+                    _rj_gold_c = bpy.data.materials.new(f"{name}_rj_gold")
+                    _rj_gold_c.use_nodes = True
+                    _rgcn = _rj_gold_c.node_tree.nodes.get("Principled BSDF")
+                    if _rgcn:
+                        _rgcn.inputs["Base Color"].default_value  = (1.0, 0.78, 0.28, 1.0)
+                        _rgcn.inputs["Metallic"].default_value    = 1.0
+                        _rgcn.inputs["Roughness"].default_value   = 0.12
+                _cp_zone_w = _cw - 0.0020
+                _cp_w = _cp_zone_w / 8
+                for _pi in range(8):
+                    _pcx = _c_cx - _cp_zone_w / 2 + _pi * _cp_w + _cp_w / 2
+                    _cp = _create_box_object(f"{name}_console_pin_{_pi}",
+                        cx=_pcx, cy=0.0060, cz=_c_cz + _ch * 0.10,
+                        w=_cp_w - 0.0003, d=0.0008, h=_ch * 0.55, collection=col)
+                    _cp.data.materials.append(_rj_gold_c)
+                    parts.append(_cp)
 
             # USB-A port
             parts.append(_create_box_object(f"{name}_usb",
@@ -1506,9 +1603,44 @@ def create_network_switch(
         parts.append(_create_box_object(f"{name}_c14_body",
             cx=c14_cx, cy=rear_y, cz=fan_cz,
             w=0.040, d=0.006, h=0.022, collection=col))
+        # Flange plate (thin aluminium surround, slightly proud of body)
         parts.append(_create_box_object(f"{name}_c14_face",
             cx=c14_cx, cy=rear_y + 0.002, cz=fan_cz,
             w=0.032, d=0.004, h=0.015, collection=col))
+        # Hero: blade contacts (Earth top-centre, L and N lower sides) + mounting screws
+        if qf.get("led_emissive"):
+            _c14_contacts = [
+                ("E",  0.0,      fan_cz + 0.003,  0.007, 0.003),   # Earth: wide flat at top
+                ("L", -0.0055,   fan_cz - 0.0025, 0.003, 0.005),   # Live: left blade
+                ("N",  0.0055,   fan_cz - 0.0025, 0.003, 0.005),   # Neutral: right blade
+            ]
+            _c14_con_mat = bpy.data.materials.new(f"{name}_c14_contact")
+            _c14_con_mat.use_nodes = True
+            _c14cn = _c14_con_mat.node_tree.nodes.get("Principled BSDF")
+            if _c14cn:
+                _c14cn.inputs["Base Color"].default_value = (0.85, 0.85, 0.82, 1.0)
+                _c14cn.inputs["Metallic"].default_value   = 0.95
+                _c14cn.inputs["Roughness"].default_value  = 0.25
+            for _lbl, _xo, _cz_c, _cw_c, _ch_c in _c14_contacts:
+                _cc = _create_box_object(f"{name}_c14_con_{_lbl}",
+                    cx=c14_cx + _xo, cy=rear_y + 0.004, cz=_cz_c,
+                    w=_cw_c, d=0.0020, h=_ch_c, collection=col)
+                _cc.data.materials.append(_c14_con_mat)
+                parts.append(_cc)
+            # 2 flat-head mounting screws (top and bottom of flange)
+            for _suf, _sz_off in [("T", 0.0085), ("B", -0.0085)]:
+                _scr = _create_box_object(f"{name}_c14_scr_{_suf}",
+                    cx=c14_cx, cy=rear_y + 0.0032, cz=fan_cz + _sz_off,
+                    w=0.005, d=0.0025, h=0.005, collection=col)
+                # Crosshead slot H
+                parts.append(_create_box_object(f"{name}_c14_scr_{_suf}_H",
+                    cx=c14_cx, cy=rear_y + 0.0058, cz=fan_cz + _sz_off,
+                    w=0.004, d=0.0008, h=0.001, collection=col))
+                # Crosshead slot V
+                parts.append(_create_box_object(f"{name}_c14_scr_{_suf}_V",
+                    cx=c14_cx, cy=rear_y + 0.0058, cz=fan_cz + _sz_off,
+                    w=0.001, d=0.0008, h=0.004, collection=col))
+                parts.append(_scr)
 
         # Service / stack connector — left side
         svc_cx = -w * 0.43
