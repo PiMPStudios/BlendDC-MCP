@@ -1155,12 +1155,15 @@ def create_network_switch(
       Control zone  ~40 mm : status LED column (SYS/POE/LNK/ACT) + mode button
                              + console RJ45 (hero: hollow + gold pins) + USB-A + power LED
       Port zone    ~340 mm : 2 rows × 12 cols (24p) or 2 rows × 24 cols (48p)
-                             RJ45 cage faces with group dividers, LED bars,
-                             and hero-quality 8-pin gold contact arrays per port
+                             RJ45 cage faces, group dividers (2 groups of 6 for 24p,
+                             4 groups of 6 for 48p), LED bars/dots per quality tier,
+                             hero: 8-pin gold contact arrays per port
+      [24p only]             hero accent strip (thin chrome bar above port zone),
+                             hero product badge plate between port zone and SFP zone
       SFP zone      ~56 mm : 4 × SFP+ cages in 2×2 arrangement, 37 mm deep,
                              hero: 2×10 gold contact grid at cage rear, LED dots
 
-    Rear face: 4 × 80 mm fan exhausts (ring + blade bars) centred in width,
+    Rear face: 2 fans (24p) or 4 fans (48p), ring + blade bars centred in width,
                C14 IEC power inlet with hero-quality 3-contact + 2-screw detail (right),
                service/stack connector (left).
 
@@ -1227,8 +1230,9 @@ def create_network_switch(
 
         col_w     = PORT_W / n_cols
 
-        # Physical RJ45 opening — capped to realistic keystone dimensions
-        PORT_SLOT_W = min(col_w * 0.72, 0.0135)   # ≤ 13.5 mm
+        # Physical RJ45 opening — 24P gets wider ports (more breathing room per column)
+        _slot_cap   = 0.0135 if is_48p else 0.0155   # 13.5 mm (48P) / 15.5 mm (24P)
+        PORT_SLOT_W = min(col_w * 0.72, _slot_cap)
         PORT_SLOT_H = h * 0.193                    # ≈ 8.6 mm for 1U
 
         # Vertical block: [port_zone] [small gap] [LED strip]
@@ -1257,8 +1261,31 @@ def create_network_switch(
             cx=PORT_CX, cy=bg_y, cz=BLOCK_Z0 + PORT_ZONE_H / 2,
             w=PORT_W, d=bg_d, h=PORT_ZONE_H + h * 0.010, collection=col))
 
+        # ── 24P hero: thin chrome accent strip spanning full face width ───
+        # Sits between top bezel and LED strip — Catalyst-style raised bar
+        if not is_48p and qf.get("led_emissive"):
+            _acc_z = LED_Z + LED_H / 2 + 0.002
+            parts.append(_create_box_object(f"{name}_accent_strip",
+                cx=0.0, cy=-0.0020, cz=_acc_z,
+                w=w - 0.006, d=0.0018, h=0.0022, collection=col))
+
+        # ── 24P hero: product badge plate between port zone and SFP zone ──
+        # A proud rectangle on the face, right of ports — own design touch
+        if not is_48p and qf.get("led_emissive"):
+            # Outer badge frame (slightly proud)
+            parts.append(_create_box_object(f"{name}_badge_frm",
+                cx=SFP_X0 - ZONE_GAP / 2, cy=-0.0014, cz=h * 0.64,
+                w=ZONE_GAP * 0.80, d=0.0014, h=h * 0.28, collection=col))
+            # Recessed inner face of badge (dark inset = embossed label look)
+            _badge_inn = _create_box_object(f"{name}_badge_inn",
+                cx=SFP_X0 - ZONE_GAP / 2, cy=0.0010, cz=h * 0.64,
+                w=ZONE_GAP * 0.50, d=0.0012, h=h * 0.18, collection=col)
+            _badge_inn.data.materials.append(_port_dark)
+            parts.append(_badge_inn)
+
         # ── Port group vertical dividers ──────────────────────────────────
-        group_size = 6 if is_48p else 4   # columns per group
+        # 48P: 4 groups of 6 (3 dividers). 24P: 2 groups of 6 (1 centre divider).
+        group_size = 6
         n_groups   = n_cols // group_size
         div_w      = 0.0025
         div_d      = 0.0035
@@ -1562,13 +1589,14 @@ def create_network_switch(
                     w=vent_thick, d=vent_d_len, h=vent_h_dim, collection=col))
 
     # ─────────────────────────────────────────────────────────────────────
-    # REAR FACE — 4 × 80 mm fan exhausts + C14 inlet + service connector
+    # REAR FACE — fan exhausts + C14 inlet + service connector
+    # 48P: 4 fans (higher heat load). 24P: 2 fans (runs cooler).
     # ─────────────────────────────────────────────────────────────────────
     if qf["grille"]:
         FAN_D    = min(0.080, h * 0.80)       # scale to chassis — 1U→35.6 mm, 2U→71 mm
         FAN_RING = min(0.006, FAN_D * 0.075)  # proportional shroud thickness
         FAN_GAP  = min(0.010, FAN_D * 0.25)   # proportional gap
-        n_fans   = 4
+        n_fans   = 4 if (port_count >= 48) else 2
         fan_total_w = n_fans * FAN_D + (n_fans - 1) * FAN_GAP
         fan_x0   = -fan_total_w / 2
         fan_cz   = h / 2
