@@ -2008,7 +2008,7 @@ def create_network_switch(
     # ─────────────────────────────────────────────────────────────────────
     # PORT LABELS — numbers printed in the top wall of each port housing face
     # Sits in the WALL-height strip at the very top of each housing opening
-    # SFP+ labelled 49–52 centred in each cage opening
+    # SFP+ labelled 1–4, placed on the bail pull-tab (top of bail)
     # ─────────────────────────────────────────────────────────────────────
     LABEL_Y    = PORT_FRONT_Y - 0.0002    # just proud of the housing face
     LABEL_SIZE = 0.0009                    # 0.9mm — fits inside WALL=1.4mm
@@ -2019,7 +2019,7 @@ def create_network_switch(
 
     _lbl_objs = []
 
-    def _add_lbl(text_str: str, lx: float, lz: float) -> None:
+    def _add_lbl(text_str: str, lx: float, lz: float, ly: float = None) -> None:
         fc = bpy.data.curves.new("_sw_lbl_fc", type='FONT')
         fc.body = text_str
         fc.size = LABEL_SIZE
@@ -2029,7 +2029,7 @@ def create_network_switch(
         o = bpy.data.objects.new("_sw_lbl_obj", fc)
         bpy.context.scene.collection.objects.link(o)
         o.rotation_euler = (math.pi / 2, 0, 0)   # face toward -Y (front viewer)
-        o.location = (lx, LABEL_Y, lz)
+        o.location = (lx, LABEL_Y if ly is None else ly, lz)
         _lbl_objs.append(o)
 
     port_num = 1
@@ -2041,8 +2041,10 @@ def create_network_switch(
             _add_lbl(str(port_num + 1), cx, LBL_Z_LO)
             port_num += 2
 
-    for ci_sfp, (sx0, sx1, sz0, sz1) in enumerate(SFP_CAGES_DEF, 49):
-        _add_lbl(str(ci_sfp), (sx0 + sx1) / 2, (sz0 + sz1) / 2)
+    SFP_LBL_Y = SFP_MOUTH_Y - BAIL_D - 0.0002   # just proud of pull-tab front face
+    for ci_sfp, (sx0, sx1, sz0, sz1) in enumerate(SFP_CAGES_DEF, 1):
+        sfp_lbl_z = sz1 + BAIL_T + BAIL_H / 2   # centre of pull-tab vertically
+        _add_lbl(str(ci_sfp), (sx0 + sx1) / 2, sfp_lbl_z, ly=SFP_LBL_Y)
 
     if _lbl_objs:
         bpy.context.view_layer.update()
