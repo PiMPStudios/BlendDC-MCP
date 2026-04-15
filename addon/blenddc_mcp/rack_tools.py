@@ -1127,11 +1127,11 @@ def snap_to_rack_u(
             f"U{u_slot}+{u_size}U exceeds the rack's {u_height}U rail zone"
         )
 
-    # EAR_SETBACK_M: push the server 2.5 mm deeper than the rail front face so the
-    # mounting ear rests ON the flange with a subtle shoulder rather than sitting
-    # perfectly flush (ear back at rail face + 2.5 mm, ear front still protrudes).
+    # Equipment origin is at front-face-bottom-centre (Y=0 local = ear back face).
+    # Place at rail_y so the ear back sits flush against the rail front face;
+    # the ear then protrudes 2 mm toward the aisle — correct real-world mounting.
     rail_y     = pos["centre"][1]
-    mount_y    = rail_y + EAR_SETBACK_M
+    mount_y    = rail_y
 
     # Convert rack-local position to world space using the rack Body's matrix_world.
     # This handles racks at any world position or Z rotation (e.g. 180° Row B).
