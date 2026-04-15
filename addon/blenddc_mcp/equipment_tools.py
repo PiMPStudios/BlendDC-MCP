@@ -1341,10 +1341,10 @@ def create_network_switch(
 
     # ── RJ45 port constants ────────────────────────────────────────────────
     PW      = 0.01200               # port pitch width (layout spacing)
-    OW, OH  = 0.01600, 0.01180      # outer shell W / H (3D geometry)
+    OW, OH  = 0.01200, 0.01180      # outer shell W / H = PW (fits within pitch)
     OD      = 0.01600
     WALL    = 0.00140
-    IW      = OW - 2 * WALL        # 0.01320
+    IW      = OW - 2 * WALL        # 0.00920
     IH      = OH - 2 * WALL        # 0.00900
     CHAM    = 0.00048
     PORT_PROTRUDE = 0.00150
@@ -1512,8 +1512,11 @@ def create_network_switch(
     # LEDs — per-port above each RJ45
     # ─────────────────────────────────────────────────────────────────────
     led_groups: Dict[str, list] = {'M_LED_Green': [], 'M_LED_Amber': [], 'M_LED_Off': []}
-    LED_W, LED_H_dim, LED_D_dim = 0.00230, 0.00220, 0.00100
+    LED_W, LED_H_dim, LED_D_dim = 0.00110, 0.00200, 0.00100  # narrower for 2-per-port
+    LED_GAP   = 0.00060                                        # gap between the two LEDs
     LED_Z_OFFSET = OH / 2 + 0.00250
+    # offsets so the pair is centred on the port: -(LED_W/2 + LED_GAP/2) and +(...)
+    LED_X_OFFSETS = [-(LED_W / 2 + LED_GAP / 2), (LED_W / 2 + LED_GAP / 2)]
     for g in range(N_GROUPS):
         gx = port_left_edge + g * (single_grp_w + GRP_GAP)
         for p in range(G_SIZE):
@@ -1521,9 +1524,14 @@ def create_network_switch(
             for pz in [Z_UPPER, Z_LOWER]:
                 lz = pz + LED_Z_OFFSET
                 ly = PORT_FRONT_Y - 0.0002
-                r = _rng.random()
-                mat_l = 'M_LED_Green' if r < 0.55 else 'M_LED_Amber' if r < 0.80 else 'M_LED_Off'
-                led_groups[mat_l].append((px, ly, lz))
+                # left LED: link/activity (green or off)
+                r0 = _rng.random()
+                mat_left = 'M_LED_Green' if r0 < 0.70 else 'M_LED_Off'
+                led_groups[mat_left].append((px + LED_X_OFFSETS[0], ly, lz))
+                # right LED: speed/POE indicator (amber or off)
+                r1 = _rng.random()
+                mat_right = 'M_LED_Amber' if r1 < 0.45 else 'M_LED_Off'
+                led_groups[mat_right].append((px + LED_X_OFFSETS[1], ly, lz))
     for mat_name_l, positions in led_groups.items():
         if not positions:
             continue
@@ -1912,11 +1920,11 @@ def create_network_switch(
     # ─────────────────────────────────────────────────────────────────────
     # LCD DISPLAY (left of front panel)
     # ─────────────────────────────────────────────────────────────────────
-    DX0 = -0.2060; DX1 = -0.1784; DZ0 = -0.0074; DZ1 = 0.0144
-    PY_disp = FRONT_Y - 0.0005
+    DX0 = -0.2060; DX1 = -0.1784; DZ0 = -0.0100; DZ1 = 0.0118
+    PY_disp = FRONT_Y - 0.0015
     bm_disp_bz = bmesh.new()
     _sw_box(bm_disp_bz, DX0 - 0.003, DX1 + 0.003,
-            PY_disp, PY_disp + 0.004,
+            PY_disp + 0.0005, PY_disp + 0.004,
             DZ0 - 0.003, DZ1 + 0.003)
     parts.append(_sw_mesh_obj(f"{name}_display_bezel", bm_disp_bz, col, 'M_Black'))
     bm_disp_sc = bmesh.new()
