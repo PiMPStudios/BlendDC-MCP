@@ -558,16 +558,19 @@ def create_server_chassis(
         _CB_X0 = CTRL_X0 + 0.001;  _CB_X1 = CTRL_X1 - 0.001
         _CB_Y0 = FRONT_Y - 0.0005; _CB_Y1 = FRONT_Y + 0.0020
         _CB_Z0 = BAY_Z0 + 0.001;   _CB_Z1 = BAY_Z1 - 0.001
-        # Combined Z extent of both USB ports (outer frame) — values match line 665
+        # Per-port tiling — centres spaced ≥8mm apart so frames don't overlap
         _USB_OW = 0.0130; _USB_OH = 0.0060
         _USB_CX = CTRL_CX - 0.008
         _USB_X0 = _USB_CX - _USB_OW / 2; _USB_X1 = _USB_CX + _USB_OW / 2
-        _USB_Z0 = min(-HH * 0.30, -HH * 0.52) - _USB_OH / 2
-        _USB_Z1 = max(-HH * 0.30, -HH * 0.52) + _USB_OH / 2
-        _sw_box(bm_ctrl, _CB_X0,  _USB_X0, _CB_Y0, _CB_Y1, _CB_Z0, _CB_Z1)  # left of USB
-        _sw_box(bm_ctrl, _USB_X1, _CB_X1,  _CB_Y0, _CB_Y1, _CB_Z0, _CB_Z1)  # right of USB
-        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _CB_Z0, _USB_Z0)  # below USB
-        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _USB_Z1, _CB_Z1)  # above USB
+        _P1_CZ  = -HH * 0.15;  _P1_Z0 = _P1_CZ - _USB_OH / 2;  _P1_Z1 = _P1_CZ + _USB_OH / 2
+        _P2_CZ  = -HH * 0.55;  _P2_Z0 = _P2_CZ - _USB_OH / 2;  _P2_Z1 = _P2_CZ + _USB_OH / 2
+        # Left / right columns (full ctrl height)
+        _sw_box(bm_ctrl, _CB_X0,  _USB_X0, _CB_Y0, _CB_Y1, _CB_Z0, _CB_Z1)
+        _sw_box(bm_ctrl, _USB_X1, _CB_X1,  _CB_Y0, _CB_Y1, _CB_Z0, _CB_Z1)
+        # USB column strips: below port2 | [hole P2] | between | [hole P1] | above port1
+        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _CB_Z0,  _P2_Z0)
+        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _P2_Z1,  _P1_Z0)
+        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _P1_Z1,  _CB_Z1)
         parts.append(_sw_mesh_obj(f"{name}_ctrl_bg", bm_ctrl, col, 'M_DarkGrayMet'))
 
         # Power button — 8-sided cap head
@@ -667,7 +670,7 @@ def create_server_chassis(
         USB_OW = 0.0130; USB_OH = 0.0060; USB_IW = 0.0100; USB_IH = 0.0035; USB_D = 0.0100
         USB_CX = CTRL_CX - 0.008
         USB_WALL = (USB_OW - USB_IW) / 2
-        for ui, USB_CZ in enumerate([-HH * 0.30, -HH * 0.52]):
+        for ui, USB_CZ in enumerate([-HH * 0.15, -HH * 0.55]):
             FY = FRONT_Y - 0.0005  # front face of frame (slightly recessed)
             BY = FY + USB_D         # back of tunnel
             # Front face annular frame (4 rails)
@@ -881,7 +884,7 @@ def create_server_chassis(
                 ez = _EX_Z0 + ei * (_SL_H + _gap)
                 _sw_box(bm_psu_exhaust,
                         psu_x0 + 0.006, psu_x1 - 0.006,
-                        BACK_Y + 0.0020, BACK_Y + 0.0025,
+                        BACK_Y + 0.0025, BACK_Y + 0.0030,
                         ez, ez + _SL_H)
 
             # PSU LED
