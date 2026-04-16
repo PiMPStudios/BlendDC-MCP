@@ -4805,12 +4805,21 @@ def create_pdu(
                     _rj1_fy0, _rj1_fy1,
                     _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # right
             parts.append(_sw_mesh_obj(f"{name}_rj_bezel", _bm_rj1_bez, col, 'M_DarkGrayMet'))
-            # RJ45 dark port recess
+            # RJ45 dark port recess — open front (no front face) so cavity is visible
+            _rx0 = _MGT_CX - _RJ1_IW / 2;  _rx1 = _MGT_CX + _RJ1_IW / 2
+            _ry0 = fy_1u;                   _ry1 = fy_1u + 0.0060
+            _rz0 = _RJ1_CZ - _RJ1_IH / 2;  _rz1 = _RJ1_CZ + _RJ1_IH / 2
             _bm_rj1_recess = bmesh.new()
-            _sw_box(_bm_rj1_recess,
-                    _MGT_CX - _RJ1_IW / 2, _MGT_CX + _RJ1_IW / 2,
-                    fy_1u, fy_1u + 0.0060,
-                    _RJ1_CZ - _RJ1_IH / 2, _RJ1_CZ + _RJ1_IH / 2)
+            # back wall
+            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry1 - 0.0004, _ry1, _rz0, _rz1)
+            # top wall
+            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz1 - 0.0004, _rz1)
+            # bottom wall
+            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz0, _rz0 + 0.0004)
+            # left wall
+            _sw_box(_bm_rj1_recess, _rx0, _rx0 + 0.0004, _ry0, _ry1, _rz0, _rz1)
+            # right wall
+            _sw_box(_bm_rj1_recess, _rx1 - 0.0004, _rx1, _ry0, _ry1, _rz0, _rz1)
             parts.append(_sw_mesh_obj(f"{name}_rj_recess", _bm_rj1_recess, col, 'M_PlasticDark'))
             # 8 gold contact pins
             _bm_rj1_pins = bmesh.new()
