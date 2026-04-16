@@ -46,6 +46,7 @@ def _create_box_object(
     cx: float, cy: float, cz: float,
     w: float, d: float, h: float,
     collection: bpy.types.Collection,
+    material: str = "",
 ) -> bpy.types.Object:
     """Create a solid box mesh centred at (cx, cy, cz) with dimensions w×d×h."""
     mesh = bpy.data.meshes.new(name)
@@ -58,6 +59,10 @@ def _create_box_object(
     mesh.update()
     obj.location = (cx, cy, cz)
     collection.objects.link(obj)
+    if material:
+        mat = bpy.data.materials.get(material)
+        if mat:
+            obj.data.materials.append(mat)
     return obj
 
 
@@ -4290,6 +4295,7 @@ def create_pdu(
     outlet_count: int = 0,
     collection_name: str = "Equipment",
     random_variation: bool = False,
+    join_mesh: bool = False,
     quality: str = "high",
 ) -> Dict[str, Any]:
     """
@@ -4317,6 +4323,7 @@ def create_pdu(
     outlet_count:     number of C13 outlets (0 = auto per type)
     collection_name:  Blender collection
     random_variation: subtle spacing jitter and material variation
+    join_mesh:        when True join all parts into one mesh; False keeps parts separate (default)
     quality:          quality tier controlling outlet detail level
     """
     qf       = QUALITY_TIERS.get(quality, QUALITY_TIERS["high"])
@@ -4334,32 +4341,38 @@ def create_pdu(
 
     def _c13(tag, cx, cz, fy, portrait):
         """
-        C13 outlet housing + face inset + optional 3-pin stubs (ultra).
+        C13 outlet: open-frame bezel + dark socket face + optional 3-pin stubs.
         portrait=True  → taller than wide  (0U column layout)
         portrait=False → wider than tall   (1U row layout)
+        The bezel is 4 border bars (not a solid box) so the socket face is visible.
         """
         hw, hh = (0.034, 0.038) if portrait else (0.038, 0.030)
-        hd     = 0.0080   # 8 mm recess depth
-        # Outer bezel surround (slightly proud of face)
-        parts.append(_create_box_object(f"{tag}_hsg",
-            cx=cx, cy=fy - 0.0010, cz=cz,
-            w=hw + 0.004, d=0.0020, h=hh + 0.004, collection=col))
-        # Recessed socket back face
+        fr  = 0.002   # frame rail width (2 mm)
+        fd  = 0.0020  # frame depth (2 mm proud)
+        # 4-bar open frame — leaves the socket opening clear
+        _bm_fr = bmesh.new()
+        _sw_box(_bm_fr, cx-hw/2-fr, cx+hw/2+fr, fy-fd, fy, cz+hh/2,     cz+hh/2+fr)  # top
+        _sw_box(_bm_fr, cx-hw/2-fr, cx+hw/2+fr, fy-fd, fy, cz-hh/2-fr,  cz-hh/2)     # bottom
+        _sw_box(_bm_fr, cx-hw/2-fr, cx-hw/2,    fy-fd, fy, cz-hh/2,     cz+hh/2)     # left
+        _sw_box(_bm_fr, cx+hw/2,    cx+hw/2+fr, fy-fd, fy, cz-hh/2,     cz+hh/2)     # right
+        parts.append(_sw_mesh_obj(f"{tag}_frame", _bm_fr, col, 'M_DarkGrayMet'))
+        # Dark socket face — slightly proud of body, visible through frame opening
         parts.append(_create_box_object(f"{tag}_face",
-            cx=cx, cy=fy + hd, cz=cz,
-            w=hw - 0.004, d=0.0025, h=hh - 0.004, collection=col))
-        if qf["bay_3d"]:   # ultra: suggest IEC 3-pin pattern
+            cx=cx, cy=fy + 0.0005, cz=cz,
+            w=hw, d=0.0015, h=hh, collection=col,
+            material='M_PlasticDark'))
+        if qf["bay_3d"]:   # IEC 3-pin aperture stubs (gold)
             gz_off = hh * 0.28 if portrait else 0.0
             parts.append(_create_box_object(f"{tag}_gnd",
-                cx=cx, cy=fy + hd * 0.50, cz=cz + gz_off,
+                cx=cx, cy=fy - 0.0005, cz=cz + gz_off,
                 w=0.005, d=0.003, h=0.010 if portrait else 0.005,
-                collection=col))
+                collection=col, material='M_Gold'))
             for sx, lbl in [(-1, "L"), (1, "N")]:
                 pz_off = -hh * 0.18 if portrait else 0.0
                 parts.append(_create_box_object(f"{tag}_pin{lbl}",
-                    cx=cx + sx * hw * 0.30, cy=fy + hd * 0.50, cz=cz + pz_off,
+                    cx=cx + sx * hw * 0.30, cy=fy - 0.0005, cz=cz + pz_off,
                     w=0.004, d=0.003, h=0.010 if portrait else 0.005,
-                    collection=col))
+                    collection=col, material='M_Gold'))
 
     def _c19(tag, cx, cz, fy):
         """C19 heavy-duty outlet (portrait, 0U only)."""
@@ -4368,22 +4381,26 @@ def create_pdu(
         # Outer bezel
         parts.append(_create_box_object(f"{tag}_hsg",
             cx=cx, cy=fy - 0.0010, cz=cz,
-            w=hw + 0.004, d=0.0020, h=hh + 0.004, collection=col))
+            w=hw + 0.004, d=0.0020, h=hh + 0.004, collection=col,
+            material='M_DarkGrayMet'))
         # Recessed back face
         parts.append(_create_box_object(f"{tag}_face",
             cx=cx, cy=fy + hd, cz=cz,
-            w=hw - 0.004, d=0.0025, h=hh - 0.004, collection=col))
+            w=hw - 0.004, d=0.0025, h=hh - 0.004, collection=col,
+            material='M_PlasticDark'))
 
     def _c14(tag, cx, cz, fy):
         """C14 IEC inlet (1U right end)."""
         # Outer bezel
         parts.append(_create_box_object(f"{tag}_c14_hsg",
             cx=cx, cy=fy - 0.0010, cz=cz,
-            w=0.034, d=0.0020, h=0.022, collection=col))
+            w=0.034, d=0.0020, h=0.022, collection=col,
+            material='M_DarkGrayMet'))
         # Recessed back face (8 mm)
         parts.append(_create_box_object(f"{tag}_c14_face",
             cx=cx, cy=fy + 0.0080, cz=cz,
-            w=0.026, d=0.0025, h=0.014, collection=col))
+            w=0.026, d=0.0025, h=0.014, collection=col,
+            material='M_PlasticDark'))
 
     # ═════════════════════════════════════════════════════════════════════
     # 0U VERTICAL STRIP
@@ -4483,7 +4500,104 @@ def create_pdu(
             for ci, c19z in enumerate(c19_zs):
                 _c19(f"{name}_c19_{ci}", cx=0.0, cz=c19z, fy=fy_0u)
 
-        joined = _join_parts(parts, name)
+        # ── Hero: side-channel grooves (extruded aluminium profile) ─────────
+        if qf["bezel"]:
+            for _sx, _slbl in [(-1, 'L'), (1, 'R')]:
+                _ch_cx = _sx * (w_pdu / 2 - 0.0045)
+                parts.append(_create_box_object(f"{name}_ch_{_slbl}",
+                    cx=_ch_cx, cy=d_pdu / 2, cz=(h_pdu - HEAD_H - FOOT_H) / 2 + FOOT_H,
+                    w=0.003, d=d_pdu - 0.010, h=h_pdu - HEAD_H - FOOT_H - 0.008,
+                    collection=col))
+
+        # ── Hero: C20 inlet 3-pin geometry ───────────────────────────────────
+        if qf["bezel"] and qf["bay_3d"]:
+            _C20_CZ = h_pdu - HEAD_H / 2
+            _C20_H  = 0.026
+            # Ground pin (top-center, oblong vertical)
+            parts.append(_create_box_object(f"{name}_c20_gnd",
+                cx=0.0, cy=-0.0010, cz=_C20_CZ + _C20_H * 0.22,
+                w=0.0060, d=0.0040, h=0.0130, collection=col))
+            # L and N pins (bottom left/right)
+            for _px, _pl in [(-0.012, 'L'), (0.012, 'N')]:
+                parts.append(_create_box_object(f"{name}_c20_{_pl}",
+                    cx=_px, cy=-0.0010, cz=_C20_CZ - _C20_H * 0.20,
+                    w=0.0060, d=0.0040, h=0.0130, collection=col))
+
+        # ── Hero: control section — RJ45 network port + USB console ─────────
+        if qf["bezel"]:
+            _RJ0_CX  =  0.008
+            _RJ0_CZ  = CTRL_Z - 0.028
+            _RJ0_OW  = 0.018;  _RJ0_OH = 0.016
+            _RJ0_IW  = 0.0138; _RJ0_IH = 0.0092
+            # RJ45 outer bezel box
+            parts.append(_create_box_object(f"{name}_rj_bezel",
+                cx=_RJ0_CX, cy=-0.0040, cz=_RJ0_CZ,
+                w=_RJ0_OW, d=0.0080, h=_RJ0_OH, collection=col))
+            # RJ45 dark inner recess + 8 gold contact pins
+            _bm_rj0 = bmesh.new()
+            _sw_box(_bm_rj0,
+                    _RJ0_CX - _RJ0_IW / 2, _RJ0_CX + _RJ0_IW / 2,
+                    -0.0015, 0.0030,
+                    _RJ0_CZ - _RJ0_IH / 2, _RJ0_CZ + _RJ0_IH / 2)
+            _rj0_pin_w = _RJ0_IW / 10
+            for _pi0 in range(8):
+                _rpx0_0 = _RJ0_CX - _RJ0_IW / 2 + _pi0 * (_RJ0_IW / 8) + _rj0_pin_w * 0.15
+                _rpx0_1 = _rpx0_0 + _rj0_pin_w * 0.70
+                _sw_box(_bm_rj0, _rpx0_0, _rpx0_1, -0.0008, 0.0020,
+                        _RJ0_CZ - _RJ0_IH / 2 + 0.0008,
+                        _RJ0_CZ - _RJ0_IH / 2 + 0.0038)
+            parts.append(_sw_mesh_obj(f"{name}_rj_port", _bm_rj0, col, 'M_Gold'))
+            # RJ45 activity LED
+            if qf["led_emissive"]:
+                parts.append(_create_box_object(f"{name}_rj_led",
+                    cx=_RJ0_CX - _RJ0_OW / 2 - 0.0040, cy=-0.0048, cz=_RJ0_CZ,
+                    w=0.0040, d=0.0030, h=0.0040, collection=col))
+            # USB-A console port (below RJ45)
+            _USB0_CX = -0.006
+            _USB0_CZ = CTRL_Z - 0.044
+            _USB0_IW = 0.0126; _USB0_IH = 0.0046
+            parts.append(_create_box_object(f"{name}_usb_hsg",
+                cx=_USB0_CX, cy=-0.0040, cz=_USB0_CZ,
+                w=_USB0_IW + 0.006, d=0.0080, h=_USB0_IH * 2.2, collection=col))
+            _bm_usb0 = bmesh.new()
+            _sw_box(_bm_usb0,
+                    _USB0_CX - _USB0_IW / 2, _USB0_CX + _USB0_IW / 2,
+                    -0.0010, 0.0040,
+                    _USB0_CZ - _USB0_IH / 2, _USB0_CZ + _USB0_IH / 2)
+            # USB tongue divider
+            _sw_box(_bm_usb0,
+                    _USB0_CX - _USB0_IW / 2 + 0.001, _USB0_CX + _USB0_IW / 2 - 0.001,
+                    -0.0005, 0.0030,
+                    _USB0_CZ - 0.0003, _USB0_CZ + 0.0003)
+            parts.append(_sw_mesh_obj(f"{name}_usb_port", _bm_usb0, col, 'M_PlasticDark'))
+
+        # ── Hero: per-outlet status LED domes ────────────────────────────────
+        if qf["led_emissive"]:
+            _bm_oleds0 = bmesh.new()
+            for _oz0 in outlet_positions:
+                _led_cx0 = w_pdu * 0.34
+                _sw_box(_bm_oleds0,
+                        _led_cx0 - 0.0022, _led_cx0 + 0.0022,
+                        fy_0u - 0.0022, fy_0u,
+                        _oz0 - 0.0022, _oz0 + 0.0022)
+            parts.append(_sw_mesh_obj(f"{name}_outlet_leds", _bm_oleds0, col, 'M_LED_Green'))
+
+        # ── Hero: rear keyhole mounting bracket with slots ───────────────────
+        if qf.get("detailed_rear", False):
+            for _ti0, _tab_z0 in enumerate([h_pdu * 0.10, h_pdu * 0.50, h_pdu * 0.90]):
+                # Wide keyhole head
+                parts.append(_create_box_object(f"{name}_kh_head_{_ti0}",
+                    cx=0.0, cy=d_pdu + 0.007, cz=_tab_z0 + 0.007,
+                    w=0.020, d=0.014, h=0.014, collection=col))
+                # Narrow slot
+                parts.append(_create_box_object(f"{name}_kh_slot_{_ti0}",
+                    cx=0.0, cy=d_pdu + 0.007, cz=_tab_z0 - 0.006,
+                    w=0.007, d=0.014, h=0.014, collection=col))
+
+        if join_mesh:
+            joined = _join_parts(parts, name)
+        else:
+            joined = parts[0]
 
         for i, oz in enumerate(outlet_positions):
             s = _add_socket_empty(
@@ -4530,14 +4644,7 @@ def create_pdu(
 
         out_x0    = -w_pdu / 2 + METER_W + L_MARGIN
 
-        # Recessed outlet zone background plate
-        out_cx = out_x0 + OUT_ZONE / 2
-        if qf["server_bays"]:
-            parts.append(_create_box_object(f"{name}_out_bg",
-                cx=out_cx, cy=0.0010, cz=out_z,
-                w=OUT_ZONE, d=0.002, h=h_pdu * 0.80, collection=col))
-
-        # C13 outlets
+        # C13 outlets — build first so outlet_xs is populated before tiling bg
         outlet_xs: List[float] = []
         for i in range(n_outlets):
             ox = out_x0 + i * out_step + out_step / 2
@@ -4547,6 +4654,42 @@ def create_pdu(
                 _c13(f"{name}_c13_{i:02d}", cx=ox, cz=out_z,
                      fy=fy_1u, portrait=False)
 
+        # Recessed outlet zone background — tiled AROUND each outlet aperture
+        # (solid plate would block the recessed socket faces)
+        # Landscape C13 inner aperture: 0.034 wide × 0.026 tall → half = 0.017 / 0.013
+        if qf["server_bays"]:
+            _AP_HW = 0.021   # housing outer half-width  (hw=0.038 + 2×fr=0.004)/2
+            _AP_HH = 0.017   # housing outer half-height (hh=0.030 + 2×fr=0.004)/2
+            _BG_Z0 = out_z - h_pdu * 0.40
+            _BG_Z1 = out_z + h_pdu * 0.40
+            _BG_X0 = out_x0
+            _BG_X1 = out_x0 + OUT_ZONE
+            _AP_Z0 = out_z - _AP_HH
+            _AP_Z1 = out_z + _AP_HH
+            _BG_CY = 0.0010;  _BG_D = 0.002
+
+            def _rbg1u(x0, x1, z0, z1, idx):
+                if x1 - x0 < 0.0001 or z1 - z0 < 0.0001:
+                    return
+                parts.append(_create_box_object(f"{name}_out_bg_{idx}",
+                    cx=(x0+x1)/2, cy=_BG_CY, cz=(z0+z1)/2,
+                    w=x1-x0, d=_BG_D, h=z1-z0, collection=col))
+
+            _idx_bg = [0]
+            def _bg(x0, x1, z0, z1):
+                _rbg1u(x0, x1, z0, z1, _idx_bg[0]); _idx_bg[0] += 1
+
+            # Top and bottom horizontal strips (full outlet zone width)
+            _bg(_BG_X0, _BG_X1, _AP_Z1, _BG_Z1)
+            _bg(_BG_X0, _BG_X1, _BG_Z0, _AP_Z0)
+            # Left margin (before first outlet aperture)
+            _bg(_BG_X0, outlet_xs[0] - _AP_HW, _AP_Z0, _AP_Z1)
+            # Right margin (after last outlet aperture)
+            _bg(outlet_xs[-1] + _AP_HW, _BG_X1, _AP_Z0, _AP_Z1)
+            # Inter-outlet columns
+            for _ii in range(len(outlet_xs) - 1):
+                _bg(outlet_xs[_ii] + _AP_HW, outlet_xs[_ii + 1] - _AP_HW, _AP_Z0, _AP_Z1)
+
         # C14 inlet on right end
         inlet_cx = w_pdu / 2 - INLET_W / 2 - R_MARGIN
         if qf["server_bays"]:
@@ -4555,24 +4698,43 @@ def create_pdu(
         # Metered zone (left side): ammeter display + circuit breaker + LED
         meter_cx = -w_pdu / 2 + METER_W / 2
         if qf["bezel"]:
-            # 7-segment display background
+            # Display bezel surround (dark border)
             parts.append(_create_box_object(f"{name}_meter_bg",
                 cx=meter_cx, cy=fy_1u + 0.0008, cz=out_z + h_pdu * 0.12,
-                w=METER_W - 0.014, d=0.003, h=h_pdu * 0.44, collection=col))
-            # Display digits inset
+                w=METER_W - 0.014, d=0.003, h=h_pdu * 0.44, collection=col,
+                material='M_Black'))
+            # LCD display face (dark plastic, slightly proud of bezel)
             parts.append(_create_box_object(f"{name}_meter_disp",
                 cx=meter_cx, cy=fy_1u - 0.0005, cz=out_z + h_pdu * 0.12,
-                w=METER_W - 0.022, d=0.003, h=h_pdu * 0.28, collection=col))
-            # Circuit breaker button
-            parts.append(_create_box_object(f"{name}_breaker",
-                cx=meter_cx, cy=fy_1u - 0.0035, cz=out_z - h_pdu * 0.24,
-                w=0.014, d=0.004, h=0.010, collection=col))
-            # Power LED dot
-            parts.append(_create_box_object(f"{name}_pwr_led",
-                cx=_jitter(meter_cx + 0.016, 0.002, rv),
-                cy=fy_1u - 0.0030,
-                cz=_jitter(out_z - h_pdu * 0.12, 0.001, rv),
-                w=0.005, d=0.003, h=0.005, collection=col))
+                w=METER_W - 0.022, d=0.003, h=h_pdu * 0.28, collection=col,
+                material='M_PlasticDark'))
+            # Circuit breaker button — proud disc with side walls (not a flat polygon)
+            import math as _math
+            _BRK_R = 0.006;  _BRK_CX = meter_cx;  _BRK_CZ = out_z - h_pdu * 0.24
+            _BRK_Y0 = fy_1u - 0.0008   # rear (flush with face)
+            _BRK_Y1 = fy_1u - 0.0020   # front (1.2mm proud)
+            _bm_brk = bmesh.new()
+            _bvf = [_bm_brk.verts.new((_BRK_CX + _BRK_R * _math.cos(2*_math.pi*k/8),
+                                        _BRK_Y1,
+                                        _BRK_CZ + _BRK_R * _math.sin(2*_math.pi*k/8)))
+                    for k in range(8)]
+            _bvb = [_bm_brk.verts.new((_BRK_CX + _BRK_R * _math.cos(2*_math.pi*k/8),
+                                        _BRK_Y0,
+                                        _BRK_CZ + _BRK_R * _math.sin(2*_math.pi*k/8)))
+                    for k in range(8)]
+            _bm_brk.faces.new(_bvf)  # front face
+            for _k in range(8):
+                _n = (_k + 1) % 8
+                _bm_brk.faces.new([_bvf[_k], _bvb[_k], _bvb[_n], _bvf[_n]])  # sides
+            parts.append(_sw_mesh_obj(f"{name}_breaker", _bm_brk, col, 'M_DarkGrayMet'))
+            # Power LED — only used at non-hero quality; hero adds status_leds instead
+            if not qf.get("led_emissive", False):
+                parts.append(_create_box_object(f"{name}_pwr_led",
+                    cx=_jitter(meter_cx + 0.016, 0.002, rv),
+                    cy=fy_1u - 0.0010,
+                    cz=_jitter(out_z - h_pdu * 0.12, 0.001, rv),
+                    w=0.005, d=0.003, h=0.005, collection=col,
+                    material='M_LED_Green'))
 
         # Mounting ears
         ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
@@ -4589,7 +4751,102 @@ def create_pdu(
                     cx=ear_cx, cy=-ear_d + 0.001, cz=h_pdu * 0.50,
                     w=ear_w * 0.30, d=0.001, h=h_pdu * 0.22, collection=col))
 
-        joined = _join_parts(parts, name)
+        # ── Hero: M6 mounting screws on ears ─────────────────────────────────
+        if qf["ear_screws"] and qf["bezel"]:
+            import math as _math
+            _SCR1_R  = 0.003
+            _SCR1_Y  = -ear_d * 0.5
+            for _side_s, _slbl_s in [(-1, 'L'), (1, 'R')]:
+                _ear_cx_s = _side_s * (w_pdu / 2 + ear_w / 2)
+                _bm_scr1  = bmesh.new()
+                for _scr_z1 in [h_pdu * 0.25, h_pdu * 0.75]:
+                    _cv1 = [_bm_scr1.verts.new((
+                        _ear_cx_s + _SCR1_R * _math.cos(2 * _math.pi * _k / 8),
+                        _SCR1_Y,
+                        _scr_z1  + _SCR1_R * _math.sin(2 * _math.pi * _k / 8)))
+                        for _k in range(8)]
+                    _bm_scr1.faces.new(_cv1)
+                    _sw_box(_bm_scr1,
+                            _ear_cx_s - _SCR1_R * 0.80, _ear_cx_s + _SCR1_R * 0.80,
+                            _SCR1_Y - 0.0004, _SCR1_Y,
+                            _scr_z1  - _SCR1_R * 0.20, _scr_z1  + _SCR1_R * 0.20)
+                    _sw_box(_bm_scr1,
+                            _ear_cx_s - _SCR1_R * 0.20, _ear_cx_s + _SCR1_R * 0.20,
+                            _SCR1_Y - 0.0004, _SCR1_Y,
+                            _scr_z1  - _SCR1_R * 0.80, _scr_z1  + _SCR1_R * 0.80)
+                parts.append(_sw_mesh_obj(f"{name}_ear_screw_{_slbl_s}", _bm_scr1, col, 'M_DarkGrayMet'))
+
+        # ── Hero: management zone — RJ45 network port + status LEDs ──────────
+        if qf["bezel"]:
+            _MGT_CX  = meter_cx   # same X centre as display
+            _RJ1_CZ  = out_z - h_pdu * 0.34   # lower quarter of PDU height
+            _RJ1_OW  = 0.020;  _RJ1_OH = 0.016
+            _RJ1_IW  = 0.0138; _RJ1_IH = 0.0092
+            # RJ45 bezel — open 4-bar frame so port recess is visible
+            _bm_rj1_bez = bmesh.new()
+            _rj1_ow2 = _RJ1_OW / 2;  _rj1_oh2 = _RJ1_OH / 2
+            _rj1_iw2 = _RJ1_IW / 2;  _rj1_ih2 = _RJ1_IH / 2
+            _rj1_fy0 = fy_1u - 0.0018;  _rj1_fy1 = fy_1u   # 1.8mm proud
+            _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX + _rj1_ow2,
+                    _rj1_fy0, _rj1_fy1,
+                    _RJ1_CZ + _rj1_ih2, _RJ1_CZ + _rj1_oh2)   # top
+            _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX + _rj1_ow2,
+                    _rj1_fy0, _rj1_fy1,
+                    _RJ1_CZ - _rj1_oh2, _RJ1_CZ - _rj1_ih2)   # bottom
+            _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX - _rj1_iw2,
+                    _rj1_fy0, _rj1_fy1,
+                    _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # left
+            _sw_box(_bm_rj1_bez, _MGT_CX + _rj1_iw2, _MGT_CX + _rj1_ow2,
+                    _rj1_fy0, _rj1_fy1,
+                    _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # right
+            parts.append(_sw_mesh_obj(f"{name}_rj_bezel", _bm_rj1_bez, col, 'M_DarkGrayMet'))
+            # RJ45 dark port recess
+            _bm_rj1_recess = bmesh.new()
+            _sw_box(_bm_rj1_recess,
+                    _MGT_CX - _RJ1_IW / 2, _MGT_CX + _RJ1_IW / 2,
+                    fy_1u, fy_1u + 0.0060,
+                    _RJ1_CZ - _RJ1_IH / 2, _RJ1_CZ + _RJ1_IH / 2)
+            parts.append(_sw_mesh_obj(f"{name}_rj_recess", _bm_rj1_recess, col, 'M_PlasticDark'))
+            # 8 gold contact pins
+            _bm_rj1_pins = bmesh.new()
+            _rj1_pw = _RJ1_IW / 10
+            for _pi1 in range(8):
+                _rpx1_0 = _MGT_CX - _RJ1_IW / 2 + _pi1 * (_RJ1_IW / 8) + _rj1_pw * 0.15
+                _rpx1_1 = _rpx1_0 + _rj1_pw * 0.70
+                _sw_box(_bm_rj1_pins, _rpx1_0, _rpx1_1,
+                        fy_1u + 0.0020, fy_1u + 0.0045,
+                        _RJ1_CZ - _RJ1_IH / 2 + 0.001, _RJ1_CZ - _RJ1_IH / 2 + 0.004)
+            parts.append(_sw_mesh_obj(f"{name}_rj_pins", _bm_rj1_pins, col, 'M_Gold'))
+            # Two status LEDs — neat horizontal pair just below the display
+            if qf["led_emissive"]:
+                _bm_sleds1 = bmesh.new()
+                _sled_z = out_z + h_pdu * 0.38   # same row as outlet LEDs
+                for _li1 in range(2):
+                    _slx = _MGT_CX - 0.006 + _li1 * 0.010
+                    _sw_box(_bm_sleds1,
+                            _slx - 0.0022, _slx + 0.0022,
+                            fy_1u - 0.0025, fy_1u,
+                            _sled_z - 0.0022, _sled_z + 0.0022)
+                parts.append(_sw_mesh_obj(f"{name}_status_leds", _bm_sleds1, col, 'M_LED_Green'))
+
+        # ── Hero: outlet label strip + per-outlet LEDs ───────────────────────
+        if qf["bezel"]:
+            parts.append(_create_box_object(f"{name}_lbl_strip",
+                cx=out_x0 + OUT_ZONE / 2, cy=fy_1u - 0.0005, cz=out_z + h_pdu * 0.38,
+                w=OUT_ZONE - 0.004, d=0.0015, h=h_pdu * 0.10, collection=col))
+            if qf["led_emissive"]:
+                _bm_oleds1 = bmesh.new()
+                for _ox1 in outlet_xs:
+                    _sw_box(_bm_oleds1,
+                            _ox1 - 0.0022, _ox1 + 0.0022,
+                            fy_1u - 0.0028, fy_1u,
+                            out_z + h_pdu * 0.35 - 0.0022, out_z + h_pdu * 0.35 + 0.0022)
+                parts.append(_sw_mesh_obj(f"{name}_outlet_leds", _bm_oleds1, col, 'M_LED_Green'))
+
+        if join_mesh:
+            joined = _join_parts(parts, name)
+        else:
+            joined = parts[0]
 
         for i, ox in enumerate(outlet_xs):
             s = _add_socket_empty(
@@ -4629,6 +4886,7 @@ def create_pdu(
         "pdu_type":     pdu_type,
         "outlet_count": n_outlets,
         "sockets":      sockets_created,
+        "join_mesh":    join_mesh,
         "origin":       "front-face-bottom-centre (0, 0, 0)",
     }
 
