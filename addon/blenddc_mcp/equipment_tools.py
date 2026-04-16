@@ -1229,8 +1229,1217 @@ def create_server_chassis(
             bpy.ops.mesh.normals_make_consistent(inside=False)
             bpy.ops.object.mode_set(mode='OBJECT')
 
+    elif u_size == 2:
+        # ── Hero 2U server front + rear — centred coordinate system ──────
+        _sw_ensure_materials()
+        HW = w / 2;  HH = h / 2
+        FRONT_Y = -(d / 2);  BACK_Y = d / 2
+
+        # Delete chassis rear face
+        _bm_r2 = bmesh.new()
+        _bm_r2.from_mesh(parts[0].data)
+        bmesh.ops.delete(_bm_r2,
+            geom=[f for f in _bm_r2.faces if f.calc_center_median().y > d/2*0.97],
+            context='FACES_ONLY')
+        _bm_r2.to_mesh(parts[0].data); _bm_r2.free(); parts[0].data.update()
+
+        # ── Front layout ──────────────────────────────────────────────────
+        L_M2 = 0.010; R_M2 = 0.008
+        CTRL_W2 = 0.055; VENT_W2 = 0.082; ZG2 = 0.004
+        CTRL_X0_2 = -HW + L_M2;  CTRL_X1_2 = CTRL_X0_2 + CTRL_W2
+        CTRL_CX_2 = (CTRL_X0_2 + CTRL_X1_2) / 2
+        VENT_X1_2 = HW - R_M2;   VENT_X0_2 = VENT_X1_2 - VENT_W2
+        BAY_X0_2  = CTRL_X1_2 + ZG2;  BAY_X1_2 = VENT_X0_2 - ZG2
+        BAY_ZW_2  = BAY_X1_2 - BAY_X0_2
+        BAY_H_2   = h * 0.84;  BAY_Z0_2 = -BAY_H_2 / 2;  BAY_Z1_2 = BAY_H_2 / 2
+        BAY_RD_2  = 0.012
+
+        # Carrier grid (4 cols × 3 rows)
+        NCOLS_2 = 4;  NROWS_2 = 3;  GX_2 = 0.0015;  GZ_2 = 0.0018
+        cw_2 = (BAY_ZW_2 - GX_2*(NCOLS_2-1)) / NCOLS_2
+        ch_2 = (BAY_H_2  - GZ_2*(NROWS_2-1)) / NROWS_2
+
+        # ── IEC C14 constants ─────────────────────────────────────────────
+        IEC_CUT_W_2 = 0.0280; IEC_CUT_H_2 = 0.0220
+        IEC_FLG_W_2 = 0.0390; IEC_FLG_H_2 = 0.0310
+        IEC_SOCK_D_2 = 0.0200; IEC_FLG_T_2 = 0.0025; S_WALL_2 = 0.002
+
+        # ── Rear layout ───────────────────────────────────────────────────
+        _io2_w = 0.110; _pcie2_w = 0.050; _fan2_w = 0.090
+        _psu2_ea = 0.085; _psu2_gap = 0.006; _rg2 = 0.005
+        _io2_x0   = -HW
+        _pcie2_x0 = _io2_x0   + _io2_w    + _rg2
+        _fan2_x0  = _pcie2_x0 + _pcie2_w  + _rg2
+        _psu2_x0L = _fan2_x0  + _fan2_w   + _rg2
+        _psu2_x1L = _psu2_x0L + _psu2_ea
+        _psu2_x0R = _psu2_x1L + _psu2_gap
+        _psu2_x1R = _psu2_x0R + _psu2_ea
+        _IEC2_CZ  = -HH * 0.35
+
+        # ── Front plate ───────────────────────────────────────────────────
+        parts.append(_sw_holey_plate(
+            f"{name}_front_plate", FRONT_Y,
+            [(BAY_X0_2,       BAY_X1_2,       BAY_Z0_2,       BAY_Z1_2),
+             (VENT_X0_2+0.001,VENT_X1_2-0.001,BAY_Z0_2+0.001, BAY_Z1_2-0.001),
+             (CTRL_X0_2+0.001,CTRL_X1_2-0.001,BAY_Z0_2+0.001, BAY_Z1_2-0.001)],
+            [], col, 'M_DarkGrayMet',
+            x_min=-HW, x_max=HW, z_min=-HH, z_max=HH,
+            outward_plus_y=False))
+
+        # Top louver strip
+        bm_louv2 = bmesh.new()
+        for _li2 in range(5):
+            _zt2 = HH - 0.0003 - _li2 * 0.0018
+            _sw_box(bm_louv2, -HW+0.005, HW-0.005,
+                    FRONT_Y+h*0.3, FRONT_Y+h*0.8, _zt2-0.0004, _zt2+0.00005)
+        parts.append(_sw_mesh_obj(f"{name}_top_louvers", bm_louv2, col, 'M_DarkGrayMet'))
+
+        # Service tag
+        bm_tag2 = bmesh.new()
+        _TX2 = -HW + 0.0065
+        _sw_box(bm_tag2, _TX2-0.0055, _TX2+0.0055, FRONT_Y-0.0008, FRONT_Y, -h*0.26, h*0.26)
+        _sw_box(bm_tag2, _TX2-0.003,  _TX2+0.003,  FRONT_Y-0.004,  FRONT_Y, -h*0.26-0.004, -h*0.26)
+        parts.append(_sw_mesh_obj(f"{name}_svc_tag", bm_tag2, col, 'M_PlasticDark'))
+
+        # Bay background (recessed)
+        bm_bybg2 = bmesh.new()
+        _sw_box(bm_bybg2, BAY_X0_2, BAY_X1_2, FRONT_Y+0.002, FRONT_Y+BAY_RD_2, BAY_Z0_2, BAY_Z1_2)
+        parts.append(_sw_mesh_obj(f"{name}_bay_bg", bm_bybg2, col, 'M_PlasticDark'))
+
+        # ── 4×3 carrier grid ─────────────────────────────────────────────
+        bm_cf2 = bmesh.new(); bm_cv2 = bmesh.new()
+        bm_ch2 = bmesh.new(); bm_cl2 = bmesh.new(); bm_clw2 = bmesh.new()
+        _lbl2_objs = []
+        LBL_Y2 = FRONT_Y - 0.0020
+
+        def _add_lbl2(txt, lx, lz):
+            _fc2 = bpy.data.curves.new("_s2lbl", type='FONT')
+            _fc2.body = txt; _fc2.size = 0.0030; _fc2.extrude = 0.00030
+            _fc2.align_x = 'CENTER'; _fc2.align_y = 'CENTER'
+            _o2 = bpy.data.objects.new("_s2lbl", _fc2)
+            bpy.context.scene.collection.objects.link(_o2)
+            _o2.rotation_euler = (math.pi/2, 0, 0)
+            _o2.location = (lx, LBL_Y2, lz)
+            _lbl2_objs.append(_o2)
+
+        for _r2 in range(NROWS_2):
+            for _c2 in range(NCOLS_2):
+                _idx2  = _r2*NCOLS_2 + _c2
+                _cx2   = BAY_X0_2 + (_c2+0.5)*cw_2 + _c2*GX_2
+                _cz2   = BAY_Z0_2 + (_r2+0.5)*ch_2 + _r2*GZ_2
+                _CY2_0 = FRONT_Y + 0.0002;  _CY2_1 = FRONT_Y - 0.0018
+                _sw_box(bm_cf2, _cx2-cw_2/2+0.001, _cx2+cw_2/2-0.001,
+                        _CY2_1, _CY2_0, _cz2-ch_2/2+0.001, _cz2+ch_2/2-0.001)
+                _VW2 = cw_2*0.58; _vx2_0 = _cx2-_VW2/2+cw_2*0.08; _vx2_1 = _cx2+_VW2/2+cw_2*0.08
+                for _vi2 in range(3):
+                    _vz2 = _cz2 + (_vi2-1)*0.0032
+                    _sw_box(bm_cv2, _vx2_0, _vx2_1, _CY2_1-0.0003, _CY2_1,
+                            _vz2-0.00035, _vz2+0.00035)
+                if qf["detailed_handles"]:
+                    _HX2 = _cx2 - cw_2/2 + 0.0045
+                    _sw_box(bm_ch2, _HX2-0.00275, _HX2+0.00275,
+                            FRONT_Y-0.0038, FRONT_Y-0.0002, _cz2-ch_2*0.36, _cz2+ch_2*0.36)
+                    _sw_box(bm_ch2, _HX2-0.00275, _HX2-0.00275+cw_2*0.22,
+                            FRONT_Y-0.0038, FRONT_Y-0.0002, _cz2-ch_2*0.36, _cz2-ch_2*0.36+0.0042)
+                if qf["led_emissive"]:
+                    _LX2 = _cx2+cw_2/2-0.006
+                    _LRZ2 = _cz2+ch_2/2-0.0035;  _LWZ2 = _LRZ2-0.0035
+                    _sw_box(bm_cl2, _LX2-0.0012, _LX2+0.0012,
+                            _CY2_1-0.0008, _CY2_1, _LRZ2-0.0012, _LRZ2+0.0012)
+                    _sw_box(bm_clw2, _LX2-0.0012, _LX2+0.0012,
+                            _CY2_1-0.0008, _CY2_1, _LWZ2-0.0012, _LWZ2+0.0012)
+                if qf["bezel"]:
+                    _add_lbl2(str(_idx2+1), _cx2, _cz2+ch_2/2-0.0025)
+
+        parts.append(_sw_mesh_obj(f"{name}_carrier_faces",      bm_cf2,  col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_vents",      bm_cv2,  col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_handles",    bm_ch2,  col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_leds",       bm_cl2,  col, 'M_LED_Green'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_leds_write", bm_clw2, col, 'M_LED_Amber'))
+
+        if qf["bezel"] and _lbl2_objs:
+            bpy.context.view_layer.update()
+            _dep2 = bpy.context.evaluated_depsgraph_get()
+            bm_lbl2 = bmesh.new()
+            for _fo2 in _lbl2_objs:
+                _me_t2 = bpy.data.meshes.new_from_object(_fo2.evaluated_get(_dep2))
+                _bm_t2 = bmesh.new(); _bm_t2.from_mesh(_me_t2)
+                bmesh.ops.transform(_bm_t2, matrix=_fo2.matrix_world, verts=_bm_t2.verts[:])
+                _nv2 = [bm_lbl2.verts.new(v.co) for v in _bm_t2.verts]
+                bm_lbl2.verts.ensure_lookup_table(); _bm_t2.verts.ensure_lookup_table()
+                _bm_t2.faces.ensure_lookup_table()
+                for _ft2 in _bm_t2.faces:
+                    try: bm_lbl2.faces.new([_nv2[v.index] for v in _ft2.verts])
+                    except: pass
+                _bm_t2.free(); bpy.data.meshes.remove(_me_t2)
+                _fc2_d = _fo2.data; bpy.data.objects.remove(_fo2); bpy.data.curves.remove(_fc2_d)
+            parts.append(_sw_mesh_obj(f"{name}_bay_labels", bm_lbl2, col, 'M_White'))
+
+        # ── Honeycomb vent panel (right side) ─────────────────────────────
+        bm_vent2 = bmesh.new()
+        VX0_2 = VENT_X0_2+0.002; VX1_2 = VENT_X1_2-0.002
+        _sw_box(bm_vent2, VX0_2, VX1_2, FRONT_Y+0.001, FRONT_Y+0.004, BAY_Z0_2, BAY_Z1_2)
+        _VNT_NC = 5; _VNT_NR = 11; _VNT_BH = 0.0014
+        _vcw2 = (VX1_2-VX0_2) / _VNT_NC
+        _vrs2 = (BAY_H_2-0.004) / _VNT_NR
+        for _vc2 in range(_VNT_NC):
+            _vx0c2 = VX0_2+_vc2*_vcw2+0.0005; _vx1c2 = _vx0c2+_vcw2-0.001
+            for _vr2 in range(_VNT_NR):
+                _vzb2 = BAY_Z0_2+0.002+_vr2*_vrs2
+                _sw_box(bm_vent2, _vx0c2, _vx1c2,
+                        FRONT_Y-0.0005, FRONT_Y+0.0005, _vzb2, _vzb2+_VNT_BH)
+        parts.append(_sw_mesh_obj(f"{name}_vent_panel", bm_vent2, col, 'M_DarkGrayMet'))
+
+        # ── Left control panel (5-strip USB tiling) ───────────────────────
+        bm_ctrl2 = bmesh.new()
+        _P1_2CZ = -HH*0.05; _P1_2Z0 = _P1_2CZ-0.003; _P1_2Z1 = _P1_2CZ+0.003
+        _P2_2CZ = -HH*0.35; _P2_2Z0 = _P2_2CZ-0.003; _P2_2Z1 = _P2_2CZ+0.003
+        _USB2_OW = 0.0130; _USB2_OH = 0.0060
+        _USB2_CX = CTRL_CX_2 + 0.004
+        _USB2_X0 = _USB2_CX-_USB2_OW/2; _USB2_X1 = _USB2_CX+_USB2_OW/2
+        _CB2_X0 = CTRL_X0_2+0.001; _CB2_X1 = CTRL_X1_2-0.001
+        _CB2_Y0 = FRONT_Y-0.0005;  _CB2_Y1 = FRONT_Y+0.0020
+        _CB2_Z0 = BAY_Z0_2+0.001;  _CB2_Z1 = BAY_Z1_2-0.001
+        _sw_box(bm_ctrl2, _CB2_X0,  _USB2_X0, _CB2_Y0, _CB2_Y1, _CB2_Z0, _CB2_Z1)
+        _sw_box(bm_ctrl2, _USB2_X1, _CB2_X1,  _CB2_Y0, _CB2_Y1, _CB2_Z0, _CB2_Z1)
+        _sw_box(bm_ctrl2, _USB2_X0, _USB2_X1, _CB2_Y0, _CB2_Y1, _CB2_Z0, _P2_2Z0)
+        _sw_box(bm_ctrl2, _USB2_X0, _USB2_X1, _CB2_Y0, _CB2_Y1, _P2_2Z1, _P1_2Z0)
+        _sw_box(bm_ctrl2, _USB2_X0, _USB2_X1, _CB2_Y0, _CB2_Y1, _P1_2Z1, _CB2_Z1)
+        parts.append(_sw_mesh_obj(f"{name}_ctrl_bg", bm_ctrl2, col, 'M_DarkGrayMet'))
+
+        # Power button (8-sided cap head)
+        PWR2_CX = CTRL_CX_2+0.012; PWR2_CZ = HH*0.52
+        PWR2_R = 0.0038; PWR2_T = 0.0030; PWR2_SEG = 8; PWR2_Y = FRONT_Y-0.0030
+        bm_pwr2 = bmesh.new(); fv2p = []; bv2p = []
+        for _i2p in range(PWR2_SEG):
+            _a2p = math.pi/PWR2_SEG + 2*math.pi*_i2p/PWR2_SEG
+            fv2p.append(bm_pwr2.verts.new((PWR2_CX+PWR2_R*math.cos(_a2p), PWR2_Y,         PWR2_CZ+PWR2_R*math.sin(_a2p))))
+            bv2p.append(bm_pwr2.verts.new((PWR2_CX+PWR2_R*math.cos(_a2p), PWR2_Y+PWR2_T,  PWR2_CZ+PWR2_R*math.sin(_a2p))))
+        cf2p = bm_pwr2.verts.new((PWR2_CX, PWR2_Y,         PWR2_CZ))
+        cb2p = bm_pwr2.verts.new((PWR2_CX, PWR2_Y+PWR2_T,  PWR2_CZ))
+        for _i2p in range(PWR2_SEG):
+            _n2p = (_i2p+1)%PWR2_SEG
+            _sw_F(bm_pwr2, [fv2p[_i2p], fv2p[_n2p], bv2p[_n2p], bv2p[_i2p]])
+            try: bm_pwr2.faces.new([cf2p, fv2p[_n2p], fv2p[_i2p]])
+            except: pass
+            try: bm_pwr2.faces.new([cb2p, bv2p[_i2p], bv2p[_n2p]])
+            except: pass
+        parts.append(_sw_mesh_obj(f"{name}_pwr_btn", bm_pwr2, col, 'M_Black'))
+
+        if qf["led_emissive"]:
+            PWR2_RING_OR = PWR2_R+0.0018; PWR2_RING_IR = PWR2_R+0.0004; PWR2_RING_D = 0.0005
+            bm_pwr2_led = bmesh.new()
+            fr2_o=[]; fr2_i=[]; bk2_o=[]; bk2_i=[]
+            for _i2r in range(16):
+                _a2r = 2*math.pi*_i2r/16; _co2r = math.cos(_a2r); _si2r = math.sin(_a2r)
+                fr2_o.append(bm_pwr2_led.verts.new((PWR2_CX+PWR2_RING_OR*_co2r, PWR2_Y,              PWR2_CZ+PWR2_RING_OR*_si2r)))
+                fr2_i.append(bm_pwr2_led.verts.new((PWR2_CX+PWR2_RING_IR*_co2r, PWR2_Y,              PWR2_CZ+PWR2_RING_IR*_si2r)))
+                bk2_o.append(bm_pwr2_led.verts.new((PWR2_CX+PWR2_RING_OR*_co2r, PWR2_Y+PWR2_RING_D,  PWR2_CZ+PWR2_RING_OR*_si2r)))
+                bk2_i.append(bm_pwr2_led.verts.new((PWR2_CX+PWR2_RING_IR*_co2r, PWR2_Y+PWR2_RING_D,  PWR2_CZ+PWR2_RING_IR*_si2r)))
+            for _i2r in range(16):
+                _n2r = (_i2r+1)%16
+                _sw_F(bm_pwr2_led, [fr2_o[_i2r], fr2_i[_i2r], fr2_i[_n2r], fr2_o[_n2r]])
+                _sw_F(bm_pwr2_led, [bk2_o[_i2r], bk2_o[_n2r], bk2_i[_n2r], bk2_i[_i2r]])
+                _sw_F(bm_pwr2_led, [fr2_o[_i2r], fr2_o[_n2r], bk2_o[_n2r], bk2_o[_i2r]])
+                _sw_F(bm_pwr2_led, [fr2_i[_i2r], bk2_i[_i2r], bk2_i[_n2r], fr2_i[_n2r]])
+            parts.append(_sw_mesh_obj(f"{name}_pwr_led", bm_pwr2_led, col, 'M_LED_Green'))
+
+        # UID button + LED ring
+        bm_uid2 = bmesh.new()
+        UID2_CX = CTRL_CX_2+0.012; UID2_CZ = HH*0.18
+        _sw_box(bm_uid2, UID2_CX-0.0025, UID2_CX+0.0025,
+                FRONT_Y-0.0028, FRONT_Y-0.0005, UID2_CZ-0.0025, UID2_CZ+0.0025)
+        parts.append(_sw_mesh_obj(f"{name}_uid_btn", bm_uid2, col, 'M_DarkGrayMet'))
+        if qf["led_emissive"]:
+            bm_uid2_led = bmesh.new()
+            UID2_OR=0.0040; UID2_IR=0.0025; UID2_D=0.0004
+            _sw_box(bm_uid2_led, UID2_CX-UID2_OR, UID2_CX+UID2_OR, FRONT_Y-0.0028, FRONT_Y-0.0028+UID2_D, UID2_CZ+UID2_IR, UID2_CZ+UID2_OR)
+            _sw_box(bm_uid2_led, UID2_CX-UID2_OR, UID2_CX+UID2_OR, FRONT_Y-0.0028, FRONT_Y-0.0028+UID2_D, UID2_CZ-UID2_OR, UID2_CZ-UID2_IR)
+            _sw_box(bm_uid2_led, UID2_CX-UID2_OR, UID2_CX-UID2_IR, FRONT_Y-0.0028, FRONT_Y-0.0028+UID2_D, UID2_CZ-UID2_OR, UID2_CZ+UID2_OR)
+            _sw_box(bm_uid2_led, UID2_CX+UID2_IR, UID2_CX+UID2_OR, FRONT_Y-0.0028, FRONT_Y-0.0028+UID2_D, UID2_CZ-UID2_OR, UID2_CZ+UID2_OR)
+            parts.append(_sw_mesh_obj(f"{name}_uid_led", bm_uid2_led, col, 'M_LED_Blue'))
+
+        # Status LEDs (3 stacked)
+        _sled2_defs = [(0.38,'M_LED_Green'),(0.12,'M_LED_Amber'),(-0.14,'M_LED_Green')]
+        _sled2_bms: dict = {}
+        SLED2_CX = CTRL_X0_2 + 0.010
+        for _lzf2, _mat2 in _sled2_defs:
+            _lz2 = HH*_lzf2
+            if _mat2 not in _sled2_bms: _sled2_bms[_mat2] = bmesh.new()
+            _sw_box(_sled2_bms[_mat2], SLED2_CX-0.0015, SLED2_CX+0.0015,
+                    FRONT_Y-0.0025, FRONT_Y-0.0005, _lz2-0.0015, _lz2+0.0015)
+        for _mat2, _bms2 in _sled2_bms.items():
+            _sfx2 = _mat2.replace('M_LED_','').lower()
+            parts.append(_sw_mesh_obj(f"{name}_sled_{_sfx2}", _bms2, col, _mat2))
+
+        # Front USB-A ×2 (annular frame + tunnel + tongue)
+        bm_usb2 = bmesh.new()
+        USB2_OW=0.0130; USB2_OH=0.0060; USB2_IW=0.0100; USB2_IH=0.0035; USB2_D=0.0100
+        for _ui2, _USBZ2 in enumerate([_P1_2CZ, _P2_2CZ]):
+            _FY2 = FRONT_Y-0.0005; _BY2 = _FY2+USB2_D; _UX2 = _USB2_CX
+            _sw_box(bm_usb2, _UX2-USB2_OW/2, _UX2+USB2_OW/2, _FY2-0.0008, _FY2, _USBZ2+USB2_IH/2, _USBZ2+USB2_OH/2)
+            _sw_box(bm_usb2, _UX2-USB2_OW/2, _UX2+USB2_OW/2, _FY2-0.0008, _FY2, _USBZ2-USB2_OH/2, _USBZ2-USB2_IH/2)
+            _sw_box(bm_usb2, _UX2-USB2_OW/2, _UX2-USB2_IW/2, _FY2-0.0008, _FY2, _USBZ2-USB2_OH/2, _USBZ2+USB2_OH/2)
+            _sw_box(bm_usb2, _UX2+USB2_IW/2, _UX2+USB2_OW/2, _FY2-0.0008, _FY2, _USBZ2-USB2_OH/2, _USBZ2+USB2_OH/2)
+            for _wp2 in [(_UX2-USB2_OW/2,_UX2+USB2_OW/2,_USBZ2+USB2_IH/2,_USBZ2+USB2_OH/2),
+                         (_UX2-USB2_OW/2,_UX2+USB2_OW/2,_USBZ2-USB2_OH/2,_USBZ2-USB2_IH/2),
+                         (_UX2-USB2_OW/2,_UX2-USB2_IW/2,_USBZ2-USB2_OH/2,_USBZ2+USB2_OH/2),
+                         (_UX2+USB2_IW/2,_UX2+USB2_OW/2,_USBZ2-USB2_OH/2,_USBZ2+USB2_OH/2)]:
+                _sw_box(bm_usb2, _wp2[0], _wp2[1], _BY2, _FY2, _wp2[2], _wp2[3])
+            _sw_box(bm_usb2, _UX2-USB2_OW/2, _UX2+USB2_OW/2, _BY2-0.0005, _BY2, _USBZ2-USB2_OH/2, _USBZ2+USB2_OH/2)
+            _sw_box(bm_usb2, _UX2-USB2_IW/2+0.001, _UX2+USB2_IW/2-0.001, _FY2+0.002, _BY2-0.001, _USBZ2, _USBZ2+USB2_IH/2-0.0003)
+        parts.append(_sw_mesh_obj(f"{name}_usb_front", bm_usb2, col, 'M_PlasticDark'))
+
+        # VGA port
+        if qf["bezel"]:
+            bm_vga2 = bmesh.new()
+            _sw_box(bm_vga2, CTRL_CX_2-0.009, CTRL_CX_2+0.009,
+                    FRONT_Y-0.004, FRONT_Y, -HH*0.65-0.006, -HH*0.65+0.006)
+            parts.append(_sw_mesh_obj(f"{name}_vga_front", bm_vga2, col, 'M_DarkGrayMet'))
+
+        # ── Rear: IEC C14 helper ─────────────────────────────────────────
+        bm_iec2_all=bmesh.new(); bm_flg2_all=bmesh.new()
+        bm_iec2_scr=bmesh.new(); bm_iec2_con=bmesh.new()
+
+        def _build_iec_at_2u(psu_cx_iec, psu_cz_iec):
+            CX_iec=psu_cx_iec; CZ_iec=psu_cz_iec
+            ox0=CX_iec-IEC_FLG_W_2/2; ox1=CX_iec+IEC_FLG_W_2/2
+            oz0=CZ_iec-IEC_FLG_H_2/2; oz1=CZ_iec+IEC_FLG_H_2/2
+            cx0=CX_iec-IEC_CUT_W_2/2; cx1=CX_iec+IEC_CUT_W_2/2
+            cz0=CZ_iec-IEC_CUT_H_2/2; cz1=CZ_iec+IEC_CUT_H_2/2
+            ix0=cx0+S_WALL_2; ix1=cx1-S_WALL_2; iz0=cz0+S_WALL_2; iz1=cz1-S_WALL_2
+            FLG_Y0=BACK_Y; FLG_Y1=BACK_Y+IEC_FLG_T_2; SOCK_Y1=BACK_Y-IEC_SOCK_D_2
+            of_v=[bm_iec2_all.verts.new((ox0,FLG_Y0,oz0)),bm_iec2_all.verts.new((ox1,FLG_Y0,oz0)),
+                  bm_iec2_all.verts.new((ox1,FLG_Y0,oz1)),bm_iec2_all.verts.new((ox0,FLG_Y0,oz1))]
+            ob_v=[bm_iec2_all.verts.new((ox0,SOCK_Y1,oz0)),bm_iec2_all.verts.new((ox1,SOCK_Y1,oz0)),
+                  bm_iec2_all.verts.new((ox1,SOCK_Y1,oz1)),bm_iec2_all.verts.new((ox0,SOCK_Y1,oz1))]
+            cf_v=[bm_iec2_all.verts.new((cx0,FLG_Y0,cz0)),bm_iec2_all.verts.new((cx1,FLG_Y0,cz0)),
+                  bm_iec2_all.verts.new((cx1,FLG_Y0,cz1)),bm_iec2_all.verts.new((cx0,FLG_Y0,cz1))]
+            it_v=[bm_iec2_all.verts.new((ix0,FLG_Y0,iz0)),bm_iec2_all.verts.new((ix1,FLG_Y0,iz0)),
+                  bm_iec2_all.verts.new((ix1,FLG_Y0,iz1)),bm_iec2_all.verts.new((ix0,FLG_Y0,iz1))]
+            ib_v=[bm_iec2_all.verts.new((ix0,SOCK_Y1,iz0)),bm_iec2_all.verts.new((ix1,SOCK_Y1,iz0)),
+                  bm_iec2_all.verts.new((ix1,SOCK_Y1,iz1)),bm_iec2_all.verts.new((ix0,SOCK_Y1,iz1))]
+            _sw_F(bm_iec2_all,[of_v[0],of_v[1],cf_v[1],cf_v[0]]); _sw_F(bm_iec2_all,[of_v[3],cf_v[3],cf_v[2],of_v[2]])
+            _sw_F(bm_iec2_all,[of_v[0],cf_v[0],cf_v[3],of_v[3]]); _sw_F(bm_iec2_all,[of_v[1],of_v[2],cf_v[2],cf_v[1]])
+            _sw_F(bm_iec2_all,[of_v[0],ob_v[0],ob_v[1],of_v[1]]); _sw_F(bm_iec2_all,[of_v[3],of_v[2],ob_v[2],ob_v[3]])
+            _sw_F(bm_iec2_all,[of_v[0],of_v[3],ob_v[3],ob_v[0]]); _sw_F(bm_iec2_all,[of_v[1],ob_v[1],ob_v[2],of_v[2]])
+            _sw_F(bm_iec2_all,[ob_v[0],ob_v[3],ob_v[2],ob_v[1]])
+            _sw_F(bm_iec2_all,[cf_v[0],cf_v[1],it_v[1],it_v[0]]); _sw_F(bm_iec2_all,[cf_v[3],it_v[3],it_v[2],cf_v[2]])
+            _sw_F(bm_iec2_all,[cf_v[0],it_v[0],it_v[3],cf_v[3]]); _sw_F(bm_iec2_all,[cf_v[1],cf_v[2],it_v[2],it_v[1]])
+            _sw_F(bm_iec2_all,[it_v[0],it_v[1],ib_v[1],ib_v[0]]); _sw_F(bm_iec2_all,[it_v[3],ib_v[3],ib_v[2],it_v[2]])
+            _sw_F(bm_iec2_all,[it_v[0],ib_v[0],ib_v[3],it_v[3]]); _sw_F(bm_iec2_all,[it_v[1],it_v[2],ib_v[2],ib_v[1]])
+            _sw_F(bm_iec2_all,[ib_v[0],ib_v[1],ib_v[2],ib_v[3]])
+            f0_v=[bm_flg2_all.verts.new((ox0,FLG_Y0,oz0)),bm_flg2_all.verts.new((ox1,FLG_Y0,oz0)),
+                  bm_flg2_all.verts.new((ox1,FLG_Y0,oz1)),bm_flg2_all.verts.new((ox0,FLG_Y0,oz1))]
+            f1_v=[bm_flg2_all.verts.new((ox0,FLG_Y1,oz0)),bm_flg2_all.verts.new((ox1,FLG_Y1,oz0)),
+                  bm_flg2_all.verts.new((ox1,FLG_Y1,oz1)),bm_flg2_all.verts.new((ox0,FLG_Y1,oz1))]
+            c0_v=[bm_flg2_all.verts.new((cx0,FLG_Y0,cz0)),bm_flg2_all.verts.new((cx1,FLG_Y0,cz0)),
+                  bm_flg2_all.verts.new((cx1,FLG_Y0,cz1)),bm_flg2_all.verts.new((cx0,FLG_Y0,cz1))]
+            c1_v=[bm_flg2_all.verts.new((cx0,FLG_Y1,cz0)),bm_flg2_all.verts.new((cx1,FLG_Y1,cz0)),
+                  bm_flg2_all.verts.new((cx1,FLG_Y1,cz1)),bm_flg2_all.verts.new((cx0,FLG_Y1,cz1))]
+            _sw_F(bm_flg2_all,[f1_v[0],f1_v[1],c1_v[1],c1_v[0]]); _sw_F(bm_flg2_all,[f1_v[3],c1_v[3],c1_v[2],f1_v[2]])
+            _sw_F(bm_flg2_all,[f1_v[0],c1_v[0],c1_v[3],f1_v[3]]); _sw_F(bm_flg2_all,[f1_v[1],f1_v[2],c1_v[2],c1_v[1]])
+            _sw_F(bm_flg2_all,[f0_v[0],c0_v[0],c0_v[1],f0_v[1]]); _sw_F(bm_flg2_all,[f0_v[3],f0_v[2],c0_v[2],c0_v[3]])
+            _sw_F(bm_flg2_all,[f0_v[0],f0_v[3],c0_v[3],c0_v[0]]); _sw_F(bm_flg2_all,[f0_v[1],c0_v[1],c0_v[2],f0_v[2]])
+            for _i2f in range(4):
+                _sw_F(bm_flg2_all,[f0_v[_i2f],f1_v[_i2f],f1_v[(_i2f+1)%4],f0_v[(_i2f+1)%4]])
+            SR2=0.002; ST2=0.001; NS2=12
+            for scx2 in [CX_iec-(IEC_CUT_W_2/2+(IEC_FLG_W_2/2-IEC_CUT_W_2/2)/2),
+                         CX_iec+(IEC_CUT_W_2/2+(IEC_FLG_W_2/2-IEC_CUT_W_2/2)/2)]:
+                _rb_v2=[]; _rf_v2=[]
+                for _si2 in range(NS2):
+                    _a2s=2*math.pi*_si2/NS2
+                    _rb_v2.append(bm_iec2_scr.verts.new((scx2+SR2*math.cos(_a2s),FLG_Y1,       CZ_iec+SR2*math.sin(_a2s))))
+                    _rf_v2.append(bm_iec2_scr.verts.new((scx2+SR2*math.cos(_a2s),FLG_Y1+ST2,   CZ_iec+SR2*math.sin(_a2s))))
+                _cf2s=bm_iec2_scr.verts.new((scx2,FLG_Y1+ST2,CZ_iec))
+                for _si2 in range(NS2):
+                    _sw_F(bm_iec2_scr,[_rb_v2[_si2],_rf_v2[_si2],_rf_v2[(_si2+1)%NS2],_rb_v2[(_si2+1)%NS2]])
+                    try: bm_iec2_scr.faces.new([_cf2s,_rf_v2[_si2],_rf_v2[(_si2+1)%NS2]])
+                    except: pass
+            PY0_2=SOCK_Y1+0.0005; PY1_2=PY0_2+0.001
+            def _b2c(cx_b,cz_b,bw,bh):
+                _sw_box(bm_iec2_con,cx_b-bw/2,cx_b+bw/2,PY0_2,PY1_2,cz_b-bh/2,cz_b+bh/2)
+            _b2c(CX_iec,CZ_iec+0.0055,0.007,0.005)
+            _b2c(CX_iec+0.0075,CZ_iec-0.0045,0.0038,0.009)
+            _b2c(CX_iec-0.0075,CZ_iec-0.0045,0.0038,0.009)
+
+        # ── Rear: RJ45 helper ────────────────────────────────────────────
+        bm_io2_rj=bmesh.new(); bm_io2_con=bmesh.new()
+        RJ2_OW=0.0160; RJ2_OH=0.0130; RJ2_WALL=0.0014
+        RJ2_IW=RJ2_OW-2*RJ2_WALL; RJ2_IH=RJ2_OH-2*RJ2_WALL
+        RJ2_CHAM=0.00048; RJ2_PROT=0.00150; RJ2_DPT=0.0160
+
+        def _build_rear_rj45_2u(px_r,pz_r):
+            py_m=BACK_Y+RJ2_PROT; py_d=py_m-RJ2_DPT; py_ib=py_d+RJ2_WALL
+            om_r=[bm_io2_rj.verts.new((px_r-RJ2_OW/2,py_m,pz_r-RJ2_OH/2)),
+                  bm_io2_rj.verts.new((px_r+RJ2_OW/2,py_m,pz_r-RJ2_OH/2)),
+                  bm_io2_rj.verts.new((px_r+RJ2_OW/2,py_m,pz_r+RJ2_OH/2)),
+                  bm_io2_rj.verts.new((px_r-RJ2_OW/2,py_m,pz_r+RJ2_OH/2))]
+            im_r=[bm_io2_rj.verts.new((px_r-RJ2_IW/2+RJ2_CHAM,py_m,pz_r-RJ2_IH/2+RJ2_CHAM)),
+                  bm_io2_rj.verts.new((px_r+RJ2_IW/2-RJ2_CHAM,py_m,pz_r-RJ2_IH/2+RJ2_CHAM)),
+                  bm_io2_rj.verts.new((px_r+RJ2_IW/2-RJ2_CHAM,py_m,pz_r+RJ2_IH/2-RJ2_CHAM)),
+                  bm_io2_rj.verts.new((px_r-RJ2_IW/2+RJ2_CHAM,py_m,pz_r+RJ2_IH/2-RJ2_CHAM))]
+            od_r=[bm_io2_rj.verts.new((px_r-RJ2_OW/2,py_d,pz_r-RJ2_OH/2)),
+                  bm_io2_rj.verts.new((px_r+RJ2_OW/2,py_d,pz_r-RJ2_OH/2)),
+                  bm_io2_rj.verts.new((px_r+RJ2_OW/2,py_d,pz_r+RJ2_OH/2)),
+                  bm_io2_rj.verts.new((px_r-RJ2_OW/2,py_d,pz_r+RJ2_OH/2))]
+            ib_r=[bm_io2_rj.verts.new((px_r-RJ2_IW/2,py_ib,pz_r-RJ2_IH/2)),
+                  bm_io2_rj.verts.new((px_r+RJ2_IW/2,py_ib,pz_r-RJ2_IH/2)),
+                  bm_io2_rj.verts.new((px_r+RJ2_IW/2,py_ib,pz_r+RJ2_IH/2)),
+                  bm_io2_rj.verts.new((px_r-RJ2_IW/2,py_ib,pz_r+RJ2_IH/2))]
+            _sw_F(bm_io2_rj,[om_r[0],om_r[1],im_r[1],im_r[0]]); _sw_F(bm_io2_rj,[om_r[2],om_r[3],im_r[3],im_r[2]])
+            _sw_F(bm_io2_rj,[om_r[3],om_r[0],im_r[0],im_r[3]]); _sw_F(bm_io2_rj,[om_r[1],om_r[2],im_r[2],im_r[1]])
+            _sw_F(bm_io2_rj,[om_r[0],od_r[0],od_r[1],om_r[1]]); _sw_F(bm_io2_rj,[om_r[3],od_r[3],od_r[2],om_r[2]])
+            _sw_F(bm_io2_rj,[om_r[3],om_r[0],od_r[0],od_r[3]]); _sw_F(bm_io2_rj,[om_r[1],od_r[1],od_r[2],om_r[2]])
+            _sw_F(bm_io2_rj,[od_r[0],od_r[3],od_r[2],od_r[1]])
+            _sw_F(bm_io2_rj,[im_r[0],im_r[1],ib_r[1],ib_r[0]]); _sw_F(bm_io2_rj,[im_r[2],im_r[3],ib_r[3],ib_r[2]])
+            _sw_F(bm_io2_rj,[im_r[3],im_r[0],ib_r[0],ib_r[3]]); _sw_F(bm_io2_rj,[im_r[1],im_r[2],ib_r[2],ib_r[1]])
+            _sw_F(bm_io2_rj,[ib_r[0],ib_r[1],ib_r[2],ib_r[3]])
+            pin_y0_r=py_ib+0.0002; pin_y1_r=pin_y0_r+0.0003
+            pin_z0_r=pz_r-RJ2_IH/2+0.001; sp_r2=RJ2_IW/9
+            for pi_r2 in range(8):
+                ppx_r2=(px_r-RJ2_IW/2)+(pi_r2+1)*sp_r2
+                _sw_box(bm_io2_con,ppx_r2-0.0003,ppx_r2+0.0003,pin_y0_r,pin_y1_r,pin_z0_r,pin_z0_r+0.0011)
+
+        # Build IEC for both PSUs
+        _psu_cx_2L=(_psu2_x0L+_psu2_x1L)/2; _psu_cx_2R=(_psu2_x0R+_psu2_x1R)/2
+        _build_iec_at_2u(_psu_cx_2L, _IEC2_CZ)
+        _build_iec_at_2u(_psu_cx_2R, _IEC2_CZ)
+
+        bm_psu2=bmesh.new(); bm_psu2_hdl=bmesh.new()
+        bm_psu2_exh=bmesh.new(); bm_psu2_led=bmesh.new()
+
+        for _p2x0,_p2x1,_p2cx in [(_psu2_x0L,_psu2_x1L,_psu_cx_2L),(_psu2_x0R,_psu2_x1R,_psu_cx_2R)]:
+            _fp2_iz0=_IEC2_CZ-IEC_CUT_H_2/2; _fp2_iz1=_IEC2_CZ+IEC_CUT_H_2/2
+            _fp2_ix0=_p2cx-IEC_CUT_W_2/2;   _fp2_ix1=_p2cx+IEC_CUT_W_2/2
+            _fp2_x0=_p2x0+0.002; _fp2_x1=_p2x1-0.002
+            _fp2_z0=-HH+0.003;   _fp2_z1=HH-0.003
+            _sw_box(bm_psu2,_fp2_x0, _fp2_ix0,BACK_Y,BACK_Y+0.002,_fp2_z0,_fp2_z1)
+            _sw_box(bm_psu2,_fp2_ix1,_fp2_x1, BACK_Y,BACK_Y+0.002,_fp2_z0,_fp2_z1)
+            _sw_box(bm_psu2,_fp2_ix0,_fp2_ix1,BACK_Y,BACK_Y+0.002,_fp2_z0,_fp2_iz0)
+            _sw_box(bm_psu2,_fp2_ix0,_fp2_ix1,BACK_Y,BACK_Y+0.002,_fp2_iz1,_fp2_z1)
+            _sw_box(bm_psu2_hdl,_p2x0+0.005,_p2x1-0.005,BACK_Y+0.001,BACK_Y+0.006,HH-0.006,HH-0.002)
+            _EX2_Z0=_IEC2_CZ+IEC_FLG_H_2/2+0.002; _EX2_Z1=HH-0.008
+            _N_EX2=5; _SL2_H=0.0011
+            _gap2=max(0.0006,(_EX2_Z1-_EX2_Z0-_N_EX2*_SL2_H)/(_N_EX2-1))
+            for _ei2 in range(_N_EX2):
+                _ez2=_EX2_Z0+_ei2*(_SL2_H+_gap2)
+                _sw_box(bm_psu2_exh,_p2x0+0.006,_p2x1-0.006,BACK_Y+0.0025,BACK_Y+0.0030,_ez2,_ez2+_SL2_H)
+            _FLK2_FX0=_p2cx-IEC_FLG_W_2/2; _FLK2_FX1=_p2cx+IEC_FLG_W_2/2
+            _FLK2_Z0=_IEC2_CZ-IEC_FLG_H_2/2+0.002; _FLK2_Z1=_IEC2_CZ+IEC_FLG_H_2/2-0.002
+            _N_FLK2=10
+            _flk2_gap=max(0.0006,(_FLK2_Z1-_FLK2_Z0-_N_FLK2*_SL2_H)/(_N_FLK2-1))
+            for _fi2 in range(_N_FLK2):
+                _fz2=_FLK2_Z0+_fi2*(_SL2_H+_flk2_gap)
+                _sw_box(bm_psu2_exh,_p2x0+0.004,_FLK2_FX0-0.002,BACK_Y+0.0025,BACK_Y+0.0030,_fz2,_fz2+_SL2_H)
+                _sw_box(bm_psu2_exh,_FLK2_FX1+0.002,_p2x1-0.004,BACK_Y+0.0025,BACK_Y+0.0030,_fz2,_fz2+_SL2_H)
+            _sw_box(bm_psu2_led,_p2cx+_psu2_ea*0.30,_p2cx+_psu2_ea*0.30+0.004,
+                    BACK_Y+0.001,BACK_Y+0.003,HH*0.72,HH*0.72+0.004)
+
+        parts.append(_sw_mesh_obj(f"{name}_psu_faces",        bm_psu2,      col, 'M_Aluminum'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_handles",      bm_psu2_hdl,  col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_body",     bm_iec2_all,  col, 'M_BlackMatte'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_flange",   bm_flg2_all,  col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_screws",   bm_iec2_scr,  col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_contacts", bm_iec2_con,  col, 'M_Gold'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_exhaust",      bm_psu2_exh,  col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_leds",         bm_psu2_led,  col, 'M_LED_Green'))
+
+        # PCIe brackets (2 slots)
+        bm_pcie2=bmesh.new(); bm_pcie2_scr=bmesh.new()
+        _pcie2_sw=(_pcie2_w-0.004)/2
+        for _pi2 in range(2):
+            _px2_0=_pcie2_x0+_pi2*(_pcie2_sw+0.004); _px2_1=_px2_0+_pcie2_sw; _scx2_p=(_px2_0+_px2_1)/2
+            _sw_box(bm_pcie2,_px2_0+0.001,_px2_1-0.001,BACK_Y,BACK_Y+0.0015,-HH+0.002,HH-0.003)
+            for _vi2_p in range(10):
+                _vz2_p=-HH*0.65+_vi2_p*(h*0.78/10)
+                _sw_box(bm_pcie2,_px2_0+0.003,_px2_1-0.003,BACK_Y+0.0002,BACK_Y+0.0015,_vz2_p,_vz2_p+0.0015)
+            SCR2R=0.0022; SCR2T=0.0018; SCR2Y=BACK_Y+0.003; SCR2CZ=HH-0.006
+            _fvp2=[]; _bvp2=[]
+            for _si2_p in range(8):
+                _a2_p=math.pi/8+2*math.pi*_si2_p/8
+                _fvp2.append(bm_pcie2_scr.verts.new((_scx2_p+SCR2R*math.cos(_a2_p),SCR2Y,        SCR2CZ+SCR2R*math.sin(_a2_p))))
+                _bvp2.append(bm_pcie2_scr.verts.new((_scx2_p+SCR2R*math.cos(_a2_p),SCR2Y+SCR2T,  SCR2CZ+SCR2R*math.sin(_a2_p))))
+            _cfp2=bm_pcie2_scr.verts.new((_scx2_p,SCR2Y,       SCR2CZ))
+            _cbp2=bm_pcie2_scr.verts.new((_scx2_p,SCR2Y+SCR2T, SCR2CZ))
+            for _si2_p in range(8):
+                _n2_p=(_si2_p+1)%8
+                _sw_F(bm_pcie2_scr,[_fvp2[_si2_p],_fvp2[_n2_p],_bvp2[_n2_p],_bvp2[_si2_p]])
+                try: bm_pcie2_scr.faces.new([_cfp2,_fvp2[_n2_p],_fvp2[_si2_p]])
+                except: pass
+                try: bm_pcie2_scr.faces.new([_cbp2,_bvp2[_si2_p],_bvp2[_n2_p]])
+                except: pass
+        parts.append(_sw_mesh_obj(f"{name}_pcie_brackets", bm_pcie2,     col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_pcie_screws",   bm_pcie2_scr, col, 'M_DarkGrayMet'))
+
+        # Fan zone (2 modules)
+        bm_fan2=bmesh.new()
+        _fan2_mw=(_fan2_w-0.004)/2
+        for _fi2 in range(2):
+            _fx2_0=_fan2_x0+_fi2*(_fan2_mw+0.004); _fx2_1=_fx2_0+_fan2_mw
+            _sw_box(bm_fan2,_fx2_0+0.001,_fx2_1-0.001,BACK_Y,BACK_Y+0.002,-HH+0.002,HH-0.003)
+            _fh2_span=HH*1.60; _fh2_z0=-HH*0.80
+            for _bi2 in range(4):
+                _fbz2=_fh2_z0+_bi2*(_fh2_span/4)
+                _sw_box(bm_fan2,_fx2_0+0.004,_fx2_1-0.004,BACK_Y+0.004,BACK_Y+0.008,_fbz2,_fbz2+0.003)
+        parts.append(_sw_mesh_obj(f"{name}_fan_zone", bm_fan2, col, 'M_DarkGrayMet'))
+
+        # IO cluster: 3 RJ45, 2 USB rear, VGA, DB9
+        _build_rear_rj45_2u(_io2_x0+0.012, HH*0.40)
+        _build_rear_rj45_2u(_io2_x0+0.030, HH*0.40)
+        _build_rear_rj45_2u(_io2_x0+0.052, HH*0.40)
+        bm_io2_con.verts.ensure_lookup_table()
+        _n_io2_con=len(bm_io2_con.verts)//8
+        for _ci2 in range(_n_io2_con):
+            _b2c_=_ci2*8; _vs2_rc=bm_io2_con.verts[_b2c_:_b2c_+8]
+            for _f_idx2 in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+                try: bm_io2_con.faces.new([_vs2_rc[_j2] for _j2 in _f_idx2])
+                except: pass
+        parts.append(_sw_mesh_obj(f"{name}_rear_rj45_housings", bm_io2_rj,  col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_rear_rj45_contacts", bm_io2_con, col, 'M_Gold'))
+
+        bm_io2_usb_r=bmesh.new()
+        USB2_OW_R=0.0130; USB2_OH_R=0.0060; USB2_IW_R=0.0100; USB2_IH_R=0.0035; USB2_D_R=0.0100
+        USB2_CX_R=_io2_x0+0.074
+        for _ui_r2,_USB2CZR in enumerate([-HH*0.15,-HH*0.42]):
+            _FYR2=BACK_Y+0.0005; _BYR2=_FYR2-USB2_D_R
+            _sw_box(bm_io2_usb_r,USB2_CX_R-USB2_OW_R/2,USB2_CX_R+USB2_OW_R/2,_FYR2,_FYR2+0.0008,_USB2CZR+USB2_IH_R/2,_USB2CZR+USB2_OH_R/2)
+            _sw_box(bm_io2_usb_r,USB2_CX_R-USB2_OW_R/2,USB2_CX_R+USB2_OW_R/2,_FYR2,_FYR2+0.0008,_USB2CZR-USB2_OH_R/2,_USB2CZR-USB2_IH_R/2)
+            _sw_box(bm_io2_usb_r,USB2_CX_R-USB2_OW_R/2,USB2_CX_R-USB2_IW_R/2,_FYR2,_FYR2+0.0008,_USB2CZR-USB2_OH_R/2,_USB2CZR+USB2_OH_R/2)
+            _sw_box(bm_io2_usb_r,USB2_CX_R+USB2_IW_R/2,USB2_CX_R+USB2_OW_R/2,_FYR2,_FYR2+0.0008,_USB2CZR-USB2_OH_R/2,_USB2CZR+USB2_OH_R/2)
+            for _wpr2 in [(USB2_CX_R-USB2_OW_R/2,USB2_CX_R+USB2_OW_R/2,_USB2CZR+USB2_IH_R/2,_USB2CZR+USB2_OH_R/2),
+                          (USB2_CX_R-USB2_OW_R/2,USB2_CX_R+USB2_OW_R/2,_USB2CZR-USB2_OH_R/2,_USB2CZR-USB2_IH_R/2),
+                          (USB2_CX_R-USB2_OW_R/2,USB2_CX_R-USB2_IW_R/2,_USB2CZR-USB2_OH_R/2,_USB2CZR+USB2_OH_R/2),
+                          (USB2_CX_R+USB2_IW_R/2,USB2_CX_R+USB2_OW_R/2,_USB2CZR-USB2_OH_R/2,_USB2CZR+USB2_OH_R/2)]:
+                _sw_box(bm_io2_usb_r,_wpr2[0],_wpr2[1],_BYR2,_FYR2,_wpr2[2],_wpr2[3])
+            _sw_box(bm_io2_usb_r,USB2_CX_R-USB2_OW_R/2,USB2_CX_R+USB2_OW_R/2,_BYR2,_BYR2+0.0005,_USB2CZR-USB2_OH_R/2,_USB2CZR+USB2_OH_R/2)
+            _sw_box(bm_io2_usb_r,USB2_CX_R-USB2_IW_R/2+0.001,USB2_CX_R+USB2_IW_R/2-0.001,_BYR2+0.001,_FYR2-0.002,_USB2CZR,_USB2CZR+USB2_IH_R/2-0.0003)
+        bm_io2_misc=bmesh.new()
+        _sw_box(bm_io2_misc,_io2_x0+0.090,_io2_x0+0.108,BACK_Y+0.001,BACK_Y+0.004,HH*0.25-0.0075,HH*0.25+0.0075)
+        _sw_box(bm_io2_misc,_io2_x0+0.090,_io2_x0+0.108,BACK_Y+0.001,BACK_Y+0.004,-HH*0.58-0.005,-HH*0.58+0.005)
+        parts.append(_sw_mesh_obj(f"{name}_usb_rear",    bm_io2_usb_r, col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_rear_io_misc",bm_io2_misc,  col, 'M_DarkGrayMet'))
+
+        # Rear background panel
+        bm_r2bg=bmesh.new()
+        def _rbg2(x0,x1,z0,z1): _sw_box(bm_r2bg,x0,x1,BACK_Y-0.002,BACK_Y,z0,z1)
+        # PCIe + fan zone: solid
+        _rbg2(_pcie2_x0, _psu2_x0L, -HH, HH)
+        # IO zone left margin + gap strip
+        _rbg2(-HW, _io2_x0+0.004, -HH, HH)
+        _rbg2(_io2_x0+_io2_w, _pcie2_x0, -HH, HH)
+        # IO zone: tile around RJ45 openings (3 ports, same Z band)
+        _RJ2_IHW = RJ2_IW / 2;  _RJ2_IHH = RJ2_IH / 2
+        _RJ2_CZ  = HH * 0.40
+        _RJ2_Z0  = _RJ2_CZ - _RJ2_IHH;  _RJ2_Z1 = _RJ2_CZ + _RJ2_IHH
+        for _rjcx in [_io2_x0+0.012, _io2_x0+0.030, _io2_x0+0.052]:
+            _rx0 = _rjcx - _RJ2_IHW;  _rx1 = _rjcx + _RJ2_IHW
+            _rbg2(_rx0, _rx1, -HH, _RJ2_Z0)   # below RJ45 hole
+            _rbg2(_rx0, _rx1, _RJ2_Z1, HH)    # above RJ45 hole
+        # Solid columns between and around RJ45 ports
+        _rbg2(_io2_x0+0.004,        _io2_x0+0.012-_RJ2_IHW, -HH, HH)
+        _rbg2(_io2_x0+0.012+_RJ2_IHW, _io2_x0+0.030-_RJ2_IHW, -HH, HH)
+        _rbg2(_io2_x0+0.030+_RJ2_IHW, _io2_x0+0.052-_RJ2_IHW, -HH, HH)
+        _rbg2(_io2_x0+0.052+_RJ2_IHW, _io2_x0+0.074-USB2_IW_R/2, -HH, HH)
+        # USB column: tile around two holes at different Z
+        _USBCX_R = _io2_x0 + 0.074
+        _USBRX0 = _USBCX_R - USB2_IW_R/2;  _USBRX1 = _USBCX_R + USB2_IW_R/2
+        _USB1_Z0 = -HH*0.15 - USB2_IH_R/2;  _USB1_Z1 = -HH*0.15 + USB2_IH_R/2
+        _USB2_Z0 = -HH*0.42 - USB2_IH_R/2;  _USB2_Z1 = -HH*0.42 + USB2_IH_R/2
+        _rbg2(_USBRX0, _USBRX1, -HH,      _USB2_Z0)
+        _rbg2(_USBRX0, _USBRX1, _USB2_Z1, _USB1_Z0)
+        _rbg2(_USBRX0, _USBRX1, _USB1_Z1, HH)
+        # Solid remainder: VGA+DB9 zone → right edge of IO zone
+        _rbg2(_USBRX1, _io2_x0+_io2_w, -HH, HH)
+        # PSU separators and right edge
+        _rbg2(_psu2_x1L,_psu2_x0R,-HH,HH)                  # between PSUs
+        _rbg2(_psu2_x1R,HW,-HH,HH)                          # right edge
+        for _pbx0,_pbx1 in [(_psu2_x0L,_psu2_x1L),(_psu2_x0R,_psu2_x1R)]:
+            _pcx2=(_pbx0+_pbx1)/2
+            _bgiz0=_IEC2_CZ-IEC_CUT_H_2/2; _bgiz1=_IEC2_CZ+IEC_CUT_H_2/2
+            _bgix0=_pcx2-IEC_CUT_W_2/2;    _bgix1=_pcx2+IEC_CUT_W_2/2
+            _rbg2(_pbx0,_bgix0,-HH,HH); _rbg2(_bgix1,_pbx1,-HH,HH)
+            _rbg2(_bgix0,_bgix1,-HH,_bgiz0); _rbg2(_bgix0,_bgix1,_bgiz1,HH)
+        parts.append(_sw_mesh_obj(f"{name}_rear_panel_bg",bm_r2bg,col,'M_Aluminum'))
+
+        # ── Translation: centred → equipment-origin ───────────────────────
+        tx, ty, tz = 0.0, d / 2, h / 2
+        for obj in parts[1:]:
+            me = obj.data
+            for v in me.vertices:
+                v.co.x += tx; v.co.y += ty; v.co.z += tz
+            me.update()
+            obj.hide_render = False
+        parts[0].hide_render = False
+
+        # ── Mounting ears + M6 screws (equipment-origin space) ────────────
+        ear_w_2u = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
+        ear_d_2u = 0.002; ear_h_2u = h * 0.68
+        for side_sign in (-1, 1):
+            side_label = 'L' if side_sign < 0 else 'R'
+            ear_cx_2u = side_sign * (w / 2 + ear_w_2u / 2)
+            bm_ear2 = bmesh.new()
+            _sw_box(bm_ear2,
+                    ear_cx_2u - ear_w_2u/2, ear_cx_2u + ear_w_2u/2,
+                    -ear_d_2u, 0.0,
+                    (h - ear_h_2u)/2, (h + ear_h_2u)/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_{side_label}", bm_ear2, col, 'M_Aluminum'))
+            SCR2_R_E=0.0038; SCR2_T_E=0.0028; SCR2_Y_E=-(ear_d_2u+0.001); SCR2_Z_E=h/2
+            bm_scr2e=bmesh.new(); fv2e=[]; bv2e=[]
+            for _i2e in range(8):
+                _a2e=math.pi/8+2*math.pi*_i2e/8
+                fv2e.append(bm_scr2e.verts.new((ear_cx_2u+SCR2_R_E*math.cos(_a2e),SCR2_Y_E,           SCR2_Z_E+SCR2_R_E*math.sin(_a2e))))
+                bv2e.append(bm_scr2e.verts.new((ear_cx_2u+SCR2_R_E*math.cos(_a2e),SCR2_Y_E+SCR2_T_E,  SCR2_Z_E+SCR2_R_E*math.sin(_a2e))))
+            cf2e=bm_scr2e.verts.new((ear_cx_2u,SCR2_Y_E,           SCR2_Z_E))
+            cb2e=bm_scr2e.verts.new((ear_cx_2u,SCR2_Y_E+SCR2_T_E,  SCR2_Z_E))
+            for _i2e in range(8):
+                _n2e=(_i2e+1)%8
+                _sw_F(bm_scr2e,[fv2e[_i2e],fv2e[_n2e],bv2e[_n2e],bv2e[_i2e]])
+                try: bm_scr2e.faces.new([cf2e,fv2e[_n2e],fv2e[_i2e]])
+                except: pass
+                try: bm_scr2e.faces.new([cb2e,bv2e[_i2e],bv2e[_n2e]])
+                except: pass
+            GRV2=0.0006; GRL2=SCR2_R_E*1.6
+            _sw_box(bm_scr2e,ear_cx_2u-GRL2/2,ear_cx_2u+GRL2/2,SCR2_Y_E-0.0003,SCR2_Y_E,SCR2_Z_E-GRV2/2,SCR2_Z_E+GRV2/2)
+            _sw_box(bm_scr2e,ear_cx_2u-GRV2/2,ear_cx_2u+GRV2/2,SCR2_Y_E-0.0003,SCR2_Y_E,SCR2_Z_E-GRL2/2,SCR2_Z_E+GRL2/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_screw_{side_label}", bm_scr2e, col, 'M_DarkGrayMet'))
+
+        if join_mesh:
+            joined_2u = _join_parts(parts, name)
+            bpy.ops.object.select_all(action='DESELECT')
+            joined_2u.select_set(True)
+            bpy.context.view_layer.objects.active = joined_2u
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+    elif u_size == 3:
+        # ── Hero 3U server front + rear — centred coordinate system ──────
+        _sw_ensure_materials()
+        HW_3 = w / 2;  HH_3 = h / 2
+        FRONT_Y_3 = -(d / 2);  BACK_Y_3 = d / 2
+
+        # Delete chassis rear face
+        _bm_r3 = bmesh.new()
+        _bm_r3.from_mesh(parts[0].data)
+        bmesh.ops.delete(_bm_r3,
+            geom=[f for f in _bm_r3.faces if f.calc_center_median().y > d/2*0.97],
+            context='FACES_ONLY')
+        _bm_r3.to_mesh(parts[0].data); _bm_r3.free(); parts[0].data.update()
+
+        # ── Front layout ──────────────────────────────────────────────────
+        L_M3 = 0.010; R_M3 = 0.008
+        CTRL_W3 = 0.060; VENT_W3 = 0.090
+        CTRL_X0_3 = -HW_3 + L_M3;  CTRL_X1_3 = CTRL_X0_3 + CTRL_W3
+        CTRL_CX_3 = (CTRL_X0_3 + CTRL_X1_3) / 2
+        VENT_X1_3 = HW_3 - R_M3;   VENT_X0_3 = VENT_X1_3 - VENT_W3
+        BAY_X0_3  = CTRL_X1_3 + 0.004;  BAY_X1_3 = VENT_X0_3 - 0.004
+        BAY_ZW_3  = BAY_X1_3 - BAY_X0_3
+        BAY_H_3   = h * 0.84;  BAY_Z0_3 = -BAY_H_3 / 2;  BAY_Z1_3 = BAY_H_3 / 2
+        BAY_RD_3  = 0.012
+
+        # Carrier grid (8 cols × 2 rows)
+        NCOLS_3 = 8;  NROWS_3 = 2;  GX_3 = 0.0015;  GZ_3 = 0.004
+        cw_3 = (BAY_ZW_3 - GX_3*(NCOLS_3-1)) / NCOLS_3
+        ch_3 = (BAY_H_3  - GZ_3*(NROWS_3-1)) / NROWS_3
+
+        # ── IEC C14 constants ─────────────────────────────────────────────
+        IEC_CUT_W_3 = 0.0280; IEC_CUT_H_3 = 0.0220
+        IEC_FLG_W_3 = 0.0390; IEC_FLG_H_3 = 0.0310
+        IEC_SOCK_D_3 = 0.0200; IEC_FLG_T_3 = 0.0025; S_WALL_3 = 0.002
+
+        # ── Rear layout ───────────────────────────────────────────────────
+        _io3_w = 0.110; _pcie3_w = 0.060; _fan3_w = 0.080
+        _psu3_ea = 0.085; _psu3_gap = 0.006; _rg3 = 0.005
+        _io3_x0   = -HW_3
+        _pcie3_x0 = _io3_x0   + _io3_w    + _rg3
+        _fan3_x0  = _pcie3_x0 + _pcie3_w  + _rg3
+        _psu3_x0L = _fan3_x0  + _fan3_w   + _rg3
+        _psu3_x1L = _psu3_x0L + _psu3_ea
+        _psu3_x0R = _psu3_x1L + _psu3_gap
+        _psu3_x1R = _psu3_x0R + _psu3_ea
+        _IEC3_CZ  = -HH_3 * 0.20
+
+        # ── Front plate ───────────────────────────────────────────────────
+        parts.append(_sw_holey_plate(
+            f"{name}_front_plate", FRONT_Y_3,
+            [(BAY_X0_3,        BAY_X1_3,        BAY_Z0_3,        BAY_Z1_3),
+             (VENT_X0_3+0.001, VENT_X1_3-0.001, BAY_Z0_3+0.001,  BAY_Z1_3-0.001),
+             (CTRL_X0_3+0.001, CTRL_X1_3-0.001, BAY_Z0_3+0.001,  BAY_Z1_3-0.001)],
+            [], col, 'M_DarkGrayMet',
+            x_min=-HW_3, x_max=HW_3, z_min=-HH_3, z_max=HH_3,
+            outward_plus_y=False))
+
+        # Top louver strip
+        bm_louv3 = bmesh.new()
+        for _li3 in range(5):
+            _zt3 = HH_3 - 0.0003 - _li3 * 0.0022
+            _sw_box(bm_louv3, -HW_3+0.005, HW_3-0.005,
+                    FRONT_Y_3+h*0.3, FRONT_Y_3+h*0.8, _zt3-0.0004, _zt3+0.00005)
+        parts.append(_sw_mesh_obj(f"{name}_top_louvers", bm_louv3, col, 'M_DarkGrayMet'))
+
+        # Service tag
+        bm_tag3 = bmesh.new()
+        _TX3 = -HW_3 + 0.0065
+        _sw_box(bm_tag3, _TX3-0.0055, _TX3+0.0055, FRONT_Y_3-0.0008, FRONT_Y_3, -h*0.26, h*0.26)
+        _sw_box(bm_tag3, _TX3-0.003,  _TX3+0.003,  FRONT_Y_3-0.004,  FRONT_Y_3, -h*0.26-0.004, -h*0.26)
+        parts.append(_sw_mesh_obj(f"{name}_svc_tag", bm_tag3, col, 'M_PlasticDark'))
+
+        # Bay background (recessed)
+        bm_bybg3 = bmesh.new()
+        _sw_box(bm_bybg3, BAY_X0_3, BAY_X1_3, FRONT_Y_3+0.002, FRONT_Y_3+BAY_RD_3, BAY_Z0_3, BAY_Z1_3)
+        parts.append(_sw_mesh_obj(f"{name}_bay_bg", bm_bybg3, col, 'M_PlasticDark'))
+
+        # ── 8×2 carrier grid ─────────────────────────────────────────────
+        bm_cf3 = bmesh.new(); bm_cv3 = bmesh.new()
+        bm_ch3 = bmesh.new(); bm_cl3 = bmesh.new(); bm_clw3 = bmesh.new()
+        _lbl3_objs = []
+        LBL_Y3 = FRONT_Y_3 - 0.0020
+
+        def _add_lbl3(txt, lx, lz):
+            _fc3 = bpy.data.curves.new("_s3lbl", type='FONT')
+            _fc3.body = txt; _fc3.size = 0.0028; _fc3.extrude = 0.00028
+            _fc3.align_x = 'CENTER'; _fc3.align_y = 'CENTER'
+            _o3 = bpy.data.objects.new("_s3lbl", _fc3)
+            bpy.context.scene.collection.objects.link(_o3)
+            _o3.rotation_euler = (math.pi/2, 0, 0)
+            _o3.location = (lx, LBL_Y3, lz)
+            _lbl3_objs.append(_o3)
+
+        for _r3 in range(NROWS_3):
+            for _c3 in range(NCOLS_3):
+                _idx3  = _r3*NCOLS_3 + _c3
+                _cx3   = BAY_X0_3 + (_c3+0.5)*cw_3 + _c3*GX_3
+                _cz3   = BAY_Z0_3 + (_r3+0.5)*ch_3 + _r3*GZ_3
+                _CY3_0 = FRONT_Y_3 + 0.0002;  _CY3_1 = FRONT_Y_3 - 0.0018
+                _sw_box(bm_cf3, _cx3-cw_3/2+0.001, _cx3+cw_3/2-0.001,
+                        _CY3_1, _CY3_0, _cz3-ch_3/2+0.001, _cz3+ch_3/2-0.001)
+                _VW3 = cw_3*0.58; _vx3_0 = _cx3-_VW3/2+cw_3*0.08; _vx3_1 = _cx3+_VW3/2+cw_3*0.08
+                for _vi3 in range(4):
+                    _vz3 = _cz3 + (_vi3-1.5)*0.0060
+                    _sw_box(bm_cv3, _vx3_0, _vx3_1, _CY3_1-0.0003, _CY3_1,
+                            _vz3-0.00035, _vz3+0.00035)
+                if qf["detailed_handles"]:
+                    _HX3 = _cx3 - cw_3/2 + 0.0045
+                    _sw_box(bm_ch3, _HX3-0.00275, _HX3+0.00275,
+                            FRONT_Y_3-0.0038, FRONT_Y_3-0.0002, _cz3-ch_3*0.36, _cz3+ch_3*0.36)
+                    _sw_box(bm_ch3, _HX3-0.00275, _HX3-0.00275+cw_3*0.22,
+                            FRONT_Y_3-0.0038, FRONT_Y_3-0.0002, _cz3-ch_3*0.36, _cz3-ch_3*0.36+0.0042)
+                if qf["led_emissive"]:
+                    _LX3 = _cx3+cw_3/2-0.006
+                    _LRZ3 = _cz3+ch_3/2-0.0035;  _LWZ3 = _LRZ3-0.0035
+                    _sw_box(bm_cl3, _LX3-0.0012, _LX3+0.0012,
+                            _CY3_1-0.0008, _CY3_1, _LRZ3-0.0012, _LRZ3+0.0012)
+                    _sw_box(bm_clw3, _LX3-0.0012, _LX3+0.0012,
+                            _CY3_1-0.0008, _CY3_1, _LWZ3-0.0012, _LWZ3+0.0012)
+                if qf["bezel"]:
+                    _add_lbl3(str(_idx3+1), _cx3, _cz3+ch_3/2-0.0025)
+
+        parts.append(_sw_mesh_obj(f"{name}_carrier_faces",      bm_cf3,  col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_vents",      bm_cv3,  col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_handles",    bm_ch3,  col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_leds",       bm_cl3,  col, 'M_LED_Green'))
+        parts.append(_sw_mesh_obj(f"{name}_carrier_leds_write", bm_clw3, col, 'M_LED_Amber'))
+
+        if qf["bezel"] and _lbl3_objs:
+            bpy.context.view_layer.update()
+            _dep3 = bpy.context.evaluated_depsgraph_get()
+            bm_lbl3 = bmesh.new()
+            for _fo3 in _lbl3_objs:
+                _me_t3 = bpy.data.meshes.new_from_object(_fo3.evaluated_get(_dep3))
+                _bm_t3 = bmesh.new(); _bm_t3.from_mesh(_me_t3)
+                bmesh.ops.transform(_bm_t3, matrix=_fo3.matrix_world, verts=_bm_t3.verts[:])
+                _nv3 = [bm_lbl3.verts.new(v.co) for v in _bm_t3.verts]
+                bm_lbl3.verts.ensure_lookup_table(); _bm_t3.verts.ensure_lookup_table()
+                _bm_t3.faces.ensure_lookup_table()
+                for _ft3 in _bm_t3.faces:
+                    try: bm_lbl3.faces.new([_nv3[v.index] for v in _ft3.verts])
+                    except: pass
+                _bm_t3.free(); bpy.data.meshes.remove(_me_t3)
+                _fc3_d = _fo3.data; bpy.data.objects.remove(_fo3); bpy.data.curves.remove(_fc3_d)
+            parts.append(_sw_mesh_obj(f"{name}_bay_labels", bm_lbl3, col, 'M_White'))
+
+        # ── Honeycomb vent panel (right side) ─────────────────────────────
+        bm_vent3 = bmesh.new()
+        VX0_3 = VENT_X0_3+0.002; VX1_3 = VENT_X1_3-0.002
+        _sw_box(bm_vent3, VX0_3, VX1_3, FRONT_Y_3+0.001, FRONT_Y_3+0.004, BAY_Z0_3, BAY_Z1_3)
+        _VNT3_NC = 5; _VNT3_NR = 14; _VNT3_BH = 0.0014
+        _vcw3 = (VX1_3-VX0_3) / _VNT3_NC
+        _vrs3 = (BAY_H_3-0.004) / _VNT3_NR
+        for _vc3 in range(_VNT3_NC):
+            _vx0c3 = VX0_3+_vc3*_vcw3+0.0005; _vx1c3 = _vx0c3+_vcw3-0.001
+            for _vr3 in range(_VNT3_NR):
+                _vzb3 = BAY_Z0_3+0.002+_vr3*_vrs3
+                _sw_box(bm_vent3, _vx0c3, _vx1c3,
+                        FRONT_Y_3-0.0005, FRONT_Y_3+0.0005, _vzb3, _vzb3+_VNT3_BH)
+        parts.append(_sw_mesh_obj(f"{name}_vent_panel", bm_vent3, col, 'M_DarkGrayMet'))
+
+        # ── Left control panel (7-strip USB tiling for 3 USB ports) ──────
+        bm_ctrl3 = bmesh.new()
+        _P1_3CZ = -HH_3*0.03; _P1_3Z0 = _P1_3CZ-0.003; _P1_3Z1 = _P1_3CZ+0.003
+        _P2_3CZ = -HH_3*0.28; _P2_3Z0 = _P2_3CZ-0.003; _P2_3Z1 = _P2_3CZ+0.003
+        _P3_3CZ = -HH_3*0.52; _P3_3Z0 = _P3_3CZ-0.003; _P3_3Z1 = _P3_3CZ+0.003
+        _USB3_OW = 0.0130; _USB3_OH = 0.0060
+        _USB3_CX = CTRL_CX_3 + 0.006
+        _USB3_X0 = _USB3_CX-_USB3_OW/2; _USB3_X1 = _USB3_CX+_USB3_OW/2
+        _CB3_X0 = CTRL_X0_3+0.001; _CB3_X1 = CTRL_X1_3-0.001
+        _CB3_Y0 = FRONT_Y_3-0.0005;  _CB3_Y1 = FRONT_Y_3+0.0020
+        _CB3_Z0 = BAY_Z0_3+0.001;    _CB3_Z1 = BAY_Z1_3-0.001
+        # 7 strips tiling around all 3 USB openings
+        _sw_box(bm_ctrl3, _CB3_X0,  _USB3_X0, _CB3_Y0, _CB3_Y1, _CB3_Z0, _CB3_Z1)
+        _sw_box(bm_ctrl3, _USB3_X1, _CB3_X1,  _CB3_Y0, _CB3_Y1, _CB3_Z0, _CB3_Z1)
+        _sw_box(bm_ctrl3, _USB3_X0, _USB3_X1, _CB3_Y0, _CB3_Y1, _CB3_Z0, _P3_3Z0)
+        _sw_box(bm_ctrl3, _USB3_X0, _USB3_X1, _CB3_Y0, _CB3_Y1, _P3_3Z1, _P2_3Z0)
+        _sw_box(bm_ctrl3, _USB3_X0, _USB3_X1, _CB3_Y0, _CB3_Y1, _P2_3Z1, _P1_3Z0)
+        _sw_box(bm_ctrl3, _USB3_X0, _USB3_X1, _CB3_Y0, _CB3_Y1, _P1_3Z1, _CB3_Z1)
+        parts.append(_sw_mesh_obj(f"{name}_ctrl_bg", bm_ctrl3, col, 'M_DarkGrayMet'))
+
+        # Power button (8-sided cap head)
+        PWR3_CX = CTRL_CX_3+0.015; PWR3_CZ = HH_3*0.55
+        PWR3_R = 0.0042; PWR3_T = 0.0030; PWR3_SEG = 8; PWR3_Y = FRONT_Y_3-0.0030
+        bm_pwr3 = bmesh.new(); fv3p = []; bv3p = []
+        for _i3p in range(PWR3_SEG):
+            _a3p = math.pi/PWR3_SEG + 2*math.pi*_i3p/PWR3_SEG
+            fv3p.append(bm_pwr3.verts.new((PWR3_CX+PWR3_R*math.cos(_a3p), PWR3_Y,         PWR3_CZ+PWR3_R*math.sin(_a3p))))
+            bv3p.append(bm_pwr3.verts.new((PWR3_CX+PWR3_R*math.cos(_a3p), PWR3_Y+PWR3_T,  PWR3_CZ+PWR3_R*math.sin(_a3p))))
+        cf3p = bm_pwr3.verts.new((PWR3_CX, PWR3_Y,         PWR3_CZ))
+        cb3p = bm_pwr3.verts.new((PWR3_CX, PWR3_Y+PWR3_T,  PWR3_CZ))
+        for _i3p in range(PWR3_SEG):
+            _n3p = (_i3p+1)%PWR3_SEG
+            _sw_F(bm_pwr3, [fv3p[_i3p], fv3p[_n3p], bv3p[_n3p], bv3p[_i3p]])
+            try: bm_pwr3.faces.new([cf3p, fv3p[_n3p], fv3p[_i3p]])
+            except: pass
+            try: bm_pwr3.faces.new([cb3p, bv3p[_i3p], bv3p[_n3p]])
+            except: pass
+        parts.append(_sw_mesh_obj(f"{name}_pwr_btn", bm_pwr3, col, 'M_Black'))
+
+        if qf["led_emissive"]:
+            PWR3_RING_OR = PWR3_R+0.0018; PWR3_RING_IR = PWR3_R+0.0004; PWR3_RING_D = 0.0005
+            bm_pwr3_led = bmesh.new()
+            fr3_o=[]; fr3_i=[]; bk3_o=[]; bk3_i=[]
+            for _i3r in range(16):
+                _a3r = 2*math.pi*_i3r/16; _co3r = math.cos(_a3r); _si3r = math.sin(_a3r)
+                fr3_o.append(bm_pwr3_led.verts.new((PWR3_CX+PWR3_RING_OR*_co3r, PWR3_Y,              PWR3_CZ+PWR3_RING_OR*_si3r)))
+                fr3_i.append(bm_pwr3_led.verts.new((PWR3_CX+PWR3_RING_IR*_co3r, PWR3_Y,              PWR3_CZ+PWR3_RING_IR*_si3r)))
+                bk3_o.append(bm_pwr3_led.verts.new((PWR3_CX+PWR3_RING_OR*_co3r, PWR3_Y+PWR3_RING_D,  PWR3_CZ+PWR3_RING_OR*_si3r)))
+                bk3_i.append(bm_pwr3_led.verts.new((PWR3_CX+PWR3_RING_IR*_co3r, PWR3_Y+PWR3_RING_D,  PWR3_CZ+PWR3_RING_IR*_si3r)))
+            for _i3r in range(16):
+                _n3r = (_i3r+1)%16
+                _sw_F(bm_pwr3_led, [fr3_o[_i3r], fr3_i[_i3r], fr3_i[_n3r], fr3_o[_n3r]])
+                _sw_F(bm_pwr3_led, [bk3_o[_i3r], bk3_o[_n3r], bk3_i[_n3r], bk3_i[_i3r]])
+                _sw_F(bm_pwr3_led, [fr3_o[_i3r], fr3_o[_n3r], bk3_o[_n3r], bk3_o[_i3r]])
+                _sw_F(bm_pwr3_led, [fr3_i[_i3r], bk3_i[_i3r], bk3_i[_n3r], fr3_i[_n3r]])
+            parts.append(_sw_mesh_obj(f"{name}_pwr_led", bm_pwr3_led, col, 'M_LED_Green'))
+
+        # UID button + LED ring
+        bm_uid3 = bmesh.new()
+        UID3_CX = CTRL_CX_3+0.005; UID3_CZ = HH_3*0.42
+        _sw_box(bm_uid3, UID3_CX-0.0025, UID3_CX+0.0025,
+                FRONT_Y_3-0.0028, FRONT_Y_3-0.0005, UID3_CZ-0.0025, UID3_CZ+0.0025)
+        parts.append(_sw_mesh_obj(f"{name}_uid_btn", bm_uid3, col, 'M_DarkGrayMet'))
+        if qf["led_emissive"]:
+            bm_uid3_led = bmesh.new()
+            UID3_OR=0.0040; UID3_IR=0.0025; UID3_D=0.0004
+            _sw_box(bm_uid3_led, UID3_CX-UID3_OR, UID3_CX+UID3_OR, FRONT_Y_3-0.0028, FRONT_Y_3-0.0028+UID3_D, UID3_CZ+UID3_IR, UID3_CZ+UID3_OR)
+            _sw_box(bm_uid3_led, UID3_CX-UID3_OR, UID3_CX+UID3_OR, FRONT_Y_3-0.0028, FRONT_Y_3-0.0028+UID3_D, UID3_CZ-UID3_OR, UID3_CZ-UID3_IR)
+            _sw_box(bm_uid3_led, UID3_CX-UID3_OR, UID3_CX-UID3_IR, FRONT_Y_3-0.0028, FRONT_Y_3-0.0028+UID3_D, UID3_CZ-UID3_OR, UID3_CZ+UID3_OR)
+            _sw_box(bm_uid3_led, UID3_CX+UID3_IR, UID3_CX+UID3_OR, FRONT_Y_3-0.0028, FRONT_Y_3-0.0028+UID3_D, UID3_CZ-UID3_OR, UID3_CZ+UID3_OR)
+            parts.append(_sw_mesh_obj(f"{name}_uid_led", bm_uid3_led, col, 'M_LED_Blue'))
+
+        # Status LEDs (4 green + 1 amber)
+        SLED3_CX = CTRL_X0_3 + 0.010
+        _sled3_green_bm = bmesh.new(); _sled3_amber_bm = bmesh.new()
+        for _sli3 in range(4):
+            _slz3 = HH_3*0.20 - _sli3*0.010
+            _sw_box(_sled3_green_bm, SLED3_CX-0.0015, SLED3_CX+0.0015,
+                    FRONT_Y_3-0.0025, FRONT_Y_3-0.0005, _slz3-0.0015, _slz3+0.0015)
+        _slz3_amb = HH_3*0.20 - 4*0.010
+        _sw_box(_sled3_amber_bm, SLED3_CX-0.0015, SLED3_CX+0.0015,
+                FRONT_Y_3-0.0025, FRONT_Y_3-0.0005, _slz3_amb-0.0015, _slz3_amb+0.0015)
+        parts.append(_sw_mesh_obj(f"{name}_sled_green", _sled3_green_bm, col, 'M_LED_Green'))
+        parts.append(_sw_mesh_obj(f"{name}_sled_amber", _sled3_amber_bm, col, 'M_LED_Amber'))
+
+        # Front USB-A ×3 (4-strip tiling × 3 positions)
+        bm_usb3 = bmesh.new()
+        USB3_OW=0.0130; USB3_OH=0.0060; USB3_IW=0.0100; USB3_IH=0.0035; USB3_D=0.0100
+        _USB3_CX_PORT = CTRL_CX_3 + 0.006
+        for _ui3, _USBZ3 in enumerate([_P1_3CZ, _P2_3CZ, _P3_3CZ]):
+            _FY3 = FRONT_Y_3-0.0005; _BY3 = _FY3+USB3_D; _UX3 = _USB3_CX_PORT
+            _sw_box(bm_usb3, _UX3-USB3_OW/2, _UX3+USB3_OW/2, _FY3-0.0008, _FY3, _USBZ3+USB3_IH/2, _USBZ3+USB3_OH/2)
+            _sw_box(bm_usb3, _UX3-USB3_OW/2, _UX3+USB3_OW/2, _FY3-0.0008, _FY3, _USBZ3-USB3_OH/2, _USBZ3-USB3_IH/2)
+            _sw_box(bm_usb3, _UX3-USB3_OW/2, _UX3-USB3_IW/2, _FY3-0.0008, _FY3, _USBZ3-USB3_OH/2, _USBZ3+USB3_OH/2)
+            _sw_box(bm_usb3, _UX3+USB3_IW/2, _UX3+USB3_OW/2, _FY3-0.0008, _FY3, _USBZ3-USB3_OH/2, _USBZ3+USB3_OH/2)
+            for _wp3 in [(_UX3-USB3_OW/2,_UX3+USB3_OW/2,_USBZ3+USB3_IH/2,_USBZ3+USB3_OH/2),
+                         (_UX3-USB3_OW/2,_UX3+USB3_OW/2,_USBZ3-USB3_OH/2,_USBZ3-USB3_IH/2),
+                         (_UX3-USB3_OW/2,_UX3-USB3_IW/2,_USBZ3-USB3_OH/2,_USBZ3+USB3_OH/2),
+                         (_UX3+USB3_IW/2,_UX3+USB3_OW/2,_USBZ3-USB3_OH/2,_USBZ3+USB3_OH/2)]:
+                _sw_box(bm_usb3, _wp3[0], _wp3[1], _BY3, _FY3, _wp3[2], _wp3[3])
+            _sw_box(bm_usb3, _UX3-USB3_OW/2, _UX3+USB3_OW/2, _BY3-0.0005, _BY3, _USBZ3-USB3_OH/2, _USBZ3+USB3_OH/2)
+            _sw_box(bm_usb3, _UX3-USB3_IW/2+0.001, _UX3+USB3_IW/2-0.001, _FY3+0.002, _BY3-0.001, _USBZ3, _USBZ3+USB3_IH/2-0.0003)
+        parts.append(_sw_mesh_obj(f"{name}_usb_front", bm_usb3, col, 'M_PlasticDark'))
+
+        # VGA DE-15 front port — centred on USB column, D-shell frame + pins
+        if qf["bezel"]:
+            VGA3_CX = _USB3_CX_PORT          # align with USB ports above
+            VGA3_CZ = -HH_3 * 0.72
+            VGA3_OW = 0.0310; VGA3_OH = 0.0125
+            VGA3_IW = 0.0255; VGA3_IH = 0.0092
+            VGA3_Y0 = FRONT_Y_3 - 0.0042; VGA3_Y1 = FRONT_Y_3
+            # D-shell outer frame (4 strips)
+            bm_vga3 = bmesh.new()
+            _sw_box(bm_vga3, VGA3_CX-VGA3_OW/2, VGA3_CX+VGA3_OW/2, VGA3_Y0, VGA3_Y1, VGA3_CZ-VGA3_OH/2, VGA3_CZ-VGA3_IH/2)
+            _sw_box(bm_vga3, VGA3_CX-VGA3_OW/2, VGA3_CX+VGA3_OW/2, VGA3_Y0, VGA3_Y1, VGA3_CZ+VGA3_IH/2, VGA3_CZ+VGA3_OH/2)
+            _sw_box(bm_vga3, VGA3_CX-VGA3_OW/2, VGA3_CX-VGA3_IW/2, VGA3_Y0, VGA3_Y1, VGA3_CZ-VGA3_OH/2, VGA3_CZ+VGA3_OH/2)
+            _sw_box(bm_vga3, VGA3_CX+VGA3_IW/2, VGA3_CX+VGA3_OW/2, VGA3_Y0, VGA3_Y1, VGA3_CZ-VGA3_OH/2, VGA3_CZ+VGA3_OH/2)
+            # Jack screw posts (6-sided, one each side)
+            for _js3x in [VGA3_CX - VGA3_OW/2 - 0.0032, VGA3_CX + VGA3_OW/2 + 0.0032]:
+                _js3r = 0.0026
+                _js3vf = []; _js3vb = []
+                for _i3j in range(6):
+                    _a3j = math.pi/6 + 2*math.pi*_i3j/6
+                    _js3vf.append(bm_vga3.verts.new((_js3x+_js3r*math.cos(_a3j), VGA3_Y0,        VGA3_CZ+_js3r*math.sin(_a3j))))
+                    _js3vb.append(bm_vga3.verts.new((_js3x+_js3r*math.cos(_a3j), VGA3_Y0+0.0014, VGA3_CZ+_js3r*math.sin(_a3j))))
+                _js3c = bm_vga3.verts.new((_js3x, VGA3_Y0+0.0014, VGA3_CZ))
+                for _i3j in range(6):
+                    _n3j = (_i3j+1)%6
+                    _sw_F(bm_vga3, [_js3vf[_i3j], _js3vf[_n3j], _js3vb[_n3j], _js3vb[_i3j]])
+                    try: bm_vga3.faces.new([_js3c, _js3vb[_i3j], _js3vb[_n3j]])
+                    except: pass
+            parts.append(_sw_mesh_obj(f"{name}_vga_front", bm_vga3, col, 'M_DarkGrayMet'))
+            # Inner recess
+            bm_vga3_in = bmesh.new()
+            _sw_box(bm_vga3_in, VGA3_CX-VGA3_IW/2, VGA3_CX+VGA3_IW/2, VGA3_Y1, VGA3_Y1+0.0010, VGA3_CZ-VGA3_IH/2, VGA3_CZ+VGA3_IH/2)
+            parts.append(_sw_mesh_obj(f"{name}_vga_inner", bm_vga3_in, col, 'M_PlasticDark'))
+            # 15 pins: 3 rows × 5 cols
+            bm_vga3_pins = bmesh.new()
+            _vga3_pr = 0.00055
+            for _vr3 in range(3):
+                _vpz3 = VGA3_CZ + (_vr3 - 1) * (VGA3_IH * 0.30)
+                for _vc3 in range(5):
+                    _vpx3 = VGA3_CX + (_vc3 - 2) * (VGA3_IW * 0.175)
+                    _sw_box(bm_vga3_pins, _vpx3-_vga3_pr, _vpx3+_vga3_pr, VGA3_Y1-0.0008, VGA3_Y1, _vpz3-_vga3_pr, _vpz3+_vga3_pr)
+            parts.append(_sw_mesh_obj(f"{name}_vga_pins", bm_vga3_pins, col, 'M_Gold'))
+
+        # ── Rear: IEC C14 helper ─────────────────────────────────────────
+        bm_psu3_iec_body=bmesh.new(); bm_psu3_iec_flange=bmesh.new()
+        bm_psu3_iec_screws=bmesh.new(); bm_psu3_iec_contacts=bmesh.new()
+
+        def _build_iec_at_3u(psu_cx_iec, psu_cz_iec):
+            CX_iec=psu_cx_iec; CZ_iec=psu_cz_iec
+            ox0=CX_iec-IEC_FLG_W_3/2; ox1=CX_iec+IEC_FLG_W_3/2
+            oz0=CZ_iec-IEC_FLG_H_3/2; oz1=CZ_iec+IEC_FLG_H_3/2
+            cx0=CX_iec-IEC_CUT_W_3/2; cx1=CX_iec+IEC_CUT_W_3/2
+            cz0=CZ_iec-IEC_CUT_H_3/2; cz1=CZ_iec+IEC_CUT_H_3/2
+            ix0=cx0+S_WALL_3; ix1=cx1-S_WALL_3; iz0=cz0+S_WALL_3; iz1=cz1-S_WALL_3
+            FLG_Y0=BACK_Y_3; FLG_Y1=BACK_Y_3+IEC_FLG_T_3; SOCK_Y1=BACK_Y_3-IEC_SOCK_D_3
+            of_v=[bm_psu3_iec_body.verts.new((ox0,FLG_Y0,oz0)),bm_psu3_iec_body.verts.new((ox1,FLG_Y0,oz0)),
+                  bm_psu3_iec_body.verts.new((ox1,FLG_Y0,oz1)),bm_psu3_iec_body.verts.new((ox0,FLG_Y0,oz1))]
+            ob_v=[bm_psu3_iec_body.verts.new((ox0,SOCK_Y1,oz0)),bm_psu3_iec_body.verts.new((ox1,SOCK_Y1,oz0)),
+                  bm_psu3_iec_body.verts.new((ox1,SOCK_Y1,oz1)),bm_psu3_iec_body.verts.new((ox0,SOCK_Y1,oz1))]
+            cf_v=[bm_psu3_iec_body.verts.new((cx0,FLG_Y0,cz0)),bm_psu3_iec_body.verts.new((cx1,FLG_Y0,cz0)),
+                  bm_psu3_iec_body.verts.new((cx1,FLG_Y0,cz1)),bm_psu3_iec_body.verts.new((cx0,FLG_Y0,cz1))]
+            it_v=[bm_psu3_iec_body.verts.new((ix0,FLG_Y0,iz0)),bm_psu3_iec_body.verts.new((ix1,FLG_Y0,iz0)),
+                  bm_psu3_iec_body.verts.new((ix1,FLG_Y0,iz1)),bm_psu3_iec_body.verts.new((ix0,FLG_Y0,iz1))]
+            ib_v=[bm_psu3_iec_body.verts.new((ix0,SOCK_Y1,iz0)),bm_psu3_iec_body.verts.new((ix1,SOCK_Y1,iz0)),
+                  bm_psu3_iec_body.verts.new((ix1,SOCK_Y1,iz1)),bm_psu3_iec_body.verts.new((ix0,SOCK_Y1,iz1))]
+            _sw_F(bm_psu3_iec_body,[of_v[0],of_v[1],cf_v[1],cf_v[0]]); _sw_F(bm_psu3_iec_body,[of_v[3],cf_v[3],cf_v[2],of_v[2]])
+            _sw_F(bm_psu3_iec_body,[of_v[0],cf_v[0],cf_v[3],of_v[3]]); _sw_F(bm_psu3_iec_body,[of_v[1],of_v[2],cf_v[2],cf_v[1]])
+            _sw_F(bm_psu3_iec_body,[of_v[0],ob_v[0],ob_v[1],of_v[1]]); _sw_F(bm_psu3_iec_body,[of_v[3],of_v[2],ob_v[2],ob_v[3]])
+            _sw_F(bm_psu3_iec_body,[of_v[0],of_v[3],ob_v[3],ob_v[0]]); _sw_F(bm_psu3_iec_body,[of_v[1],ob_v[1],ob_v[2],of_v[2]])
+            _sw_F(bm_psu3_iec_body,[ob_v[0],ob_v[3],ob_v[2],ob_v[1]])
+            _sw_F(bm_psu3_iec_body,[cf_v[0],cf_v[1],it_v[1],it_v[0]]); _sw_F(bm_psu3_iec_body,[cf_v[3],it_v[3],it_v[2],cf_v[2]])
+            _sw_F(bm_psu3_iec_body,[cf_v[0],it_v[0],it_v[3],cf_v[3]]); _sw_F(bm_psu3_iec_body,[cf_v[1],cf_v[2],it_v[2],it_v[1]])
+            _sw_F(bm_psu3_iec_body,[it_v[0],it_v[1],ib_v[1],ib_v[0]]); _sw_F(bm_psu3_iec_body,[it_v[3],ib_v[3],ib_v[2],it_v[2]])
+            _sw_F(bm_psu3_iec_body,[it_v[0],ib_v[0],ib_v[3],it_v[3]]); _sw_F(bm_psu3_iec_body,[it_v[1],it_v[2],ib_v[2],ib_v[1]])
+            _sw_F(bm_psu3_iec_body,[ib_v[0],ib_v[1],ib_v[2],ib_v[3]])
+            f0_v=[bm_psu3_iec_flange.verts.new((ox0,FLG_Y0,oz0)),bm_psu3_iec_flange.verts.new((ox1,FLG_Y0,oz0)),
+                  bm_psu3_iec_flange.verts.new((ox1,FLG_Y0,oz1)),bm_psu3_iec_flange.verts.new((ox0,FLG_Y0,oz1))]
+            f1_v=[bm_psu3_iec_flange.verts.new((ox0,FLG_Y1,oz0)),bm_psu3_iec_flange.verts.new((ox1,FLG_Y1,oz0)),
+                  bm_psu3_iec_flange.verts.new((ox1,FLG_Y1,oz1)),bm_psu3_iec_flange.verts.new((ox0,FLG_Y1,oz1))]
+            c0_v=[bm_psu3_iec_flange.verts.new((cx0,FLG_Y0,cz0)),bm_psu3_iec_flange.verts.new((cx1,FLG_Y0,cz0)),
+                  bm_psu3_iec_flange.verts.new((cx1,FLG_Y0,cz1)),bm_psu3_iec_flange.verts.new((cx0,FLG_Y0,cz1))]
+            c1_v=[bm_psu3_iec_flange.verts.new((cx0,FLG_Y1,cz0)),bm_psu3_iec_flange.verts.new((cx1,FLG_Y1,cz0)),
+                  bm_psu3_iec_flange.verts.new((cx1,FLG_Y1,cz1)),bm_psu3_iec_flange.verts.new((cx0,FLG_Y1,cz1))]
+            _sw_F(bm_psu3_iec_flange,[f1_v[0],f1_v[1],c1_v[1],c1_v[0]]); _sw_F(bm_psu3_iec_flange,[f1_v[3],c1_v[3],c1_v[2],f1_v[2]])
+            _sw_F(bm_psu3_iec_flange,[f1_v[0],c1_v[0],c1_v[3],f1_v[3]]); _sw_F(bm_psu3_iec_flange,[f1_v[1],f1_v[2],c1_v[2],c1_v[1]])
+            _sw_F(bm_psu3_iec_flange,[f0_v[0],c0_v[0],c0_v[1],f0_v[1]]); _sw_F(bm_psu3_iec_flange,[f0_v[3],f0_v[2],c0_v[2],c0_v[3]])
+            _sw_F(bm_psu3_iec_flange,[f0_v[0],f0_v[3],c0_v[3],c0_v[0]]); _sw_F(bm_psu3_iec_flange,[f0_v[1],c0_v[1],c0_v[2],f0_v[2]])
+            for _i3f in range(4):
+                _sw_F(bm_psu3_iec_flange,[f0_v[_i3f],f1_v[_i3f],f1_v[(_i3f+1)%4],f0_v[(_i3f+1)%4]])
+            SR3=0.002; ST3=0.001; NS3=12
+            for scx3 in [CX_iec-(IEC_CUT_W_3/2+(IEC_FLG_W_3/2-IEC_CUT_W_3/2)/2),
+                         CX_iec+(IEC_CUT_W_3/2+(IEC_FLG_W_3/2-IEC_CUT_W_3/2)/2)]:
+                _rb_v3=[]; _rf_v3=[]
+                for _si3 in range(NS3):
+                    _a3s=2*math.pi*_si3/NS3
+                    _rb_v3.append(bm_psu3_iec_screws.verts.new((scx3+SR3*math.cos(_a3s),FLG_Y1,       CZ_iec+SR3*math.sin(_a3s))))
+                    _rf_v3.append(bm_psu3_iec_screws.verts.new((scx3+SR3*math.cos(_a3s),FLG_Y1+ST3,   CZ_iec+SR3*math.sin(_a3s))))
+                _cf3s=bm_psu3_iec_screws.verts.new((scx3,FLG_Y1+ST3,CZ_iec))
+                for _si3 in range(NS3):
+                    _sw_F(bm_psu3_iec_screws,[_rb_v3[_si3],_rf_v3[_si3],_rf_v3[(_si3+1)%NS3],_rb_v3[(_si3+1)%NS3]])
+                    try: bm_psu3_iec_screws.faces.new([_cf3s,_rf_v3[_si3],_rf_v3[(_si3+1)%NS3]])
+                    except: pass
+            PY0_3=SOCK_Y1+0.0005; PY1_3=PY0_3+0.001
+            def _b3c(cx_b,cz_b,bw,bh):
+                _sw_box(bm_psu3_iec_contacts,cx_b-bw/2,cx_b+bw/2,PY0_3,PY1_3,cz_b-bh/2,cz_b+bh/2)
+            _b3c(CX_iec,CZ_iec+0.0055,0.007,0.005)
+            _b3c(CX_iec+0.0075,CZ_iec-0.0045,0.0038,0.009)
+            _b3c(CX_iec-0.0075,CZ_iec-0.0045,0.0038,0.009)
+
+        # ── Rear: RJ45 helper ────────────────────────────────────────────
+        bm_io3_rj=bmesh.new(); bm_io3_con=bmesh.new()
+        RJ3_OW=0.0160; RJ3_OH=0.0130; RJ3_WALL=0.0014
+        RJ3_IW=RJ3_OW-2*RJ3_WALL; RJ3_IH=RJ3_OH-2*RJ3_WALL
+        RJ3_CHAM=0.00048; RJ3_PROT=0.00150; RJ3_DPT=0.0160
+
+        def _build_rear_rj45_3u(px_r,pz_r):
+            py_m=BACK_Y_3+RJ3_PROT; py_d=py_m-RJ3_DPT; py_ib=py_d+RJ3_WALL
+            om_r=[bm_io3_rj.verts.new((px_r-RJ3_OW/2,py_m,pz_r-RJ3_OH/2)),
+                  bm_io3_rj.verts.new((px_r+RJ3_OW/2,py_m,pz_r-RJ3_OH/2)),
+                  bm_io3_rj.verts.new((px_r+RJ3_OW/2,py_m,pz_r+RJ3_OH/2)),
+                  bm_io3_rj.verts.new((px_r-RJ3_OW/2,py_m,pz_r+RJ3_OH/2))]
+            im_r=[bm_io3_rj.verts.new((px_r-RJ3_IW/2+RJ3_CHAM,py_m,pz_r-RJ3_IH/2+RJ3_CHAM)),
+                  bm_io3_rj.verts.new((px_r+RJ3_IW/2-RJ3_CHAM,py_m,pz_r-RJ3_IH/2+RJ3_CHAM)),
+                  bm_io3_rj.verts.new((px_r+RJ3_IW/2-RJ3_CHAM,py_m,pz_r+RJ3_IH/2-RJ3_CHAM)),
+                  bm_io3_rj.verts.new((px_r-RJ3_IW/2+RJ3_CHAM,py_m,pz_r+RJ3_IH/2-RJ3_CHAM))]
+            od_r=[bm_io3_rj.verts.new((px_r-RJ3_OW/2,py_d,pz_r-RJ3_OH/2)),
+                  bm_io3_rj.verts.new((px_r+RJ3_OW/2,py_d,pz_r-RJ3_OH/2)),
+                  bm_io3_rj.verts.new((px_r+RJ3_OW/2,py_d,pz_r+RJ3_OH/2)),
+                  bm_io3_rj.verts.new((px_r-RJ3_OW/2,py_d,pz_r+RJ3_OH/2))]
+            ib_r=[bm_io3_rj.verts.new((px_r-RJ3_IW/2,py_ib,pz_r-RJ3_IH/2)),
+                  bm_io3_rj.verts.new((px_r+RJ3_IW/2,py_ib,pz_r-RJ3_IH/2)),
+                  bm_io3_rj.verts.new((px_r+RJ3_IW/2,py_ib,pz_r+RJ3_IH/2)),
+                  bm_io3_rj.verts.new((px_r-RJ3_IW/2,py_ib,pz_r+RJ3_IH/2))]
+            _sw_F(bm_io3_rj,[om_r[0],om_r[1],im_r[1],im_r[0]]); _sw_F(bm_io3_rj,[om_r[2],om_r[3],im_r[3],im_r[2]])
+            _sw_F(bm_io3_rj,[om_r[3],om_r[0],im_r[0],im_r[3]]); _sw_F(bm_io3_rj,[om_r[1],om_r[2],im_r[2],im_r[1]])
+            _sw_F(bm_io3_rj,[om_r[0],od_r[0],od_r[1],om_r[1]]); _sw_F(bm_io3_rj,[om_r[3],od_r[3],od_r[2],om_r[2]])
+            _sw_F(bm_io3_rj,[om_r[3],om_r[0],od_r[0],od_r[3]]); _sw_F(bm_io3_rj,[om_r[1],od_r[1],od_r[2],om_r[2]])
+            _sw_F(bm_io3_rj,[od_r[0],od_r[3],od_r[2],od_r[1]])
+            _sw_F(bm_io3_rj,[im_r[0],im_r[1],ib_r[1],ib_r[0]]); _sw_F(bm_io3_rj,[im_r[2],im_r[3],ib_r[3],ib_r[2]])
+            _sw_F(bm_io3_rj,[im_r[3],im_r[0],ib_r[0],ib_r[3]]); _sw_F(bm_io3_rj,[im_r[1],im_r[2],ib_r[2],ib_r[1]])
+            _sw_F(bm_io3_rj,[ib_r[0],ib_r[1],ib_r[2],ib_r[3]])
+            pin_y0_r=py_ib+0.0002; pin_y1_r=pin_y0_r+0.0003
+            pin_z0_r=pz_r-RJ3_IH/2+0.001; sp_r3=RJ3_IW/9
+            for pi_r3 in range(8):
+                ppx_r3=(px_r-RJ3_IW/2)+(pi_r3+1)*sp_r3
+                _sw_box(bm_io3_con,ppx_r3-0.0003,ppx_r3+0.0003,pin_y0_r,pin_y1_r,pin_z0_r,pin_z0_r+0.0011)
+
+        # Build IEC for both PSUs
+        _psu_cx_3L=(_psu3_x0L+_psu3_x1L)/2; _psu_cx_3R=(_psu3_x0R+_psu3_x1R)/2
+        _build_iec_at_3u(_psu_cx_3L, _IEC3_CZ)
+        _build_iec_at_3u(_psu_cx_3R, _IEC3_CZ)
+
+        bm_psu3=bmesh.new(); bm_psu3_hdl=bmesh.new()
+        bm_psu3_exh=bmesh.new(); bm_psu3_led=bmesh.new()
+
+        for _p3x0,_p3x1,_p3cx in [(_psu3_x0L,_psu3_x1L,_psu_cx_3L),(_psu3_x0R,_psu3_x1R,_psu_cx_3R)]:
+            _fp3_iz0=_IEC3_CZ-IEC_CUT_H_3/2; _fp3_iz1=_IEC3_CZ+IEC_CUT_H_3/2
+            _fp3_ix0=_p3cx-IEC_CUT_W_3/2;   _fp3_ix1=_p3cx+IEC_CUT_W_3/2
+            _fp3_x0=_p3x0+0.002; _fp3_x1=_p3x1-0.002
+            _fp3_z0=-HH_3+0.003;   _fp3_z1=HH_3-0.003
+            _sw_box(bm_psu3,_fp3_x0, _fp3_ix0,BACK_Y_3,BACK_Y_3+0.002,_fp3_z0,_fp3_z1)
+            _sw_box(bm_psu3,_fp3_ix1,_fp3_x1, BACK_Y_3,BACK_Y_3+0.002,_fp3_z0,_fp3_z1)
+            _sw_box(bm_psu3,_fp3_ix0,_fp3_ix1,BACK_Y_3,BACK_Y_3+0.002,_fp3_z0,_fp3_iz0)
+            _sw_box(bm_psu3,_fp3_ix0,_fp3_ix1,BACK_Y_3,BACK_Y_3+0.002,_fp3_iz1,_fp3_z1)
+            _sw_box(bm_psu3_hdl,_p3x0+0.005,_p3x1-0.005,BACK_Y_3+0.001,BACK_Y_3+0.006,HH_3-0.006,HH_3-0.002)
+            _EX3_Z0=_IEC3_CZ+IEC_FLG_H_3/2+0.002; _EX3_Z1=HH_3-0.008
+            _N_EX3=5; _SL3_H=0.0011
+            _gap3=max(0.0006,(_EX3_Z1-_EX3_Z0-_N_EX3*_SL3_H)/(_N_EX3-1))
+            for _ei3 in range(_N_EX3):
+                _ez3=_EX3_Z0+_ei3*(_SL3_H+_gap3)
+                _sw_box(bm_psu3_exh,_p3x0+0.006,_p3x1-0.006,BACK_Y_3+0.0025,BACK_Y_3+0.0030,_ez3,_ez3+_SL3_H)
+            _FLK3_FX0=_p3cx-IEC_FLG_W_3/2; _FLK3_FX1=_p3cx+IEC_FLG_W_3/2
+            _FLK3_Z0=_IEC3_CZ-IEC_FLG_H_3/2+0.002; _FLK3_Z1=_IEC3_CZ+IEC_FLG_H_3/2-0.002
+            _N_FLK3=12
+            _flk3_gap=max(0.0006,(_FLK3_Z1-_FLK3_Z0-_N_FLK3*_SL3_H)/(_N_FLK3-1))
+            for _fi3 in range(_N_FLK3):
+                _fz3=_FLK3_Z0+_fi3*(_SL3_H+_flk3_gap)
+                _sw_box(bm_psu3_exh,_p3x0+0.004,_FLK3_FX0-0.002,BACK_Y_3+0.0025,BACK_Y_3+0.0030,_fz3,_fz3+_SL3_H)
+                _sw_box(bm_psu3_exh,_FLK3_FX1+0.002,_p3x1-0.004,BACK_Y_3+0.0025,BACK_Y_3+0.0030,_fz3,_fz3+_SL3_H)
+            _sw_box(bm_psu3_led,_p3cx+_psu3_ea*0.30,_p3cx+_psu3_ea*0.30+0.004,
+                    BACK_Y_3+0.001,BACK_Y_3+0.003,HH_3*0.72,HH_3*0.72+0.004)
+
+        parts.append(_sw_mesh_obj(f"{name}_psu_faces",        bm_psu3,              col, 'M_Aluminum'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_handles",      bm_psu3_hdl,          col, 'M_Black'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_body",     bm_psu3_iec_body,     col, 'M_BlackMatte'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_flange",   bm_psu3_iec_flange,   col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_screws",   bm_psu3_iec_screws,   col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_iec_contacts", bm_psu3_iec_contacts, col, 'M_Gold'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_exhaust",      bm_psu3_exh,          col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_psu_leds",         bm_psu3_led,          col, 'M_LED_Green'))
+
+        # PCIe brackets (3 slots)
+        bm_pcie3=bmesh.new(); bm_pcie3_scr=bmesh.new()
+        _pcie3_sw=(_pcie3_w-2*0.004)/3
+        for _pi3 in range(3):
+            _px3_0=_pcie3_x0+0.002+_pi3*(_pcie3_sw+0.002); _px3_1=_px3_0+_pcie3_sw; _scx3_p=(_px3_0+_px3_1)/2
+            _sw_box(bm_pcie3,_px3_0+0.001,_px3_1-0.001,BACK_Y_3,BACK_Y_3+0.0015,-HH_3+0.002,HH_3-0.003)
+            if qf["bay_3d"]:
+                for _vi3_p in range(10):
+                    _vz3_p=-HH_3*0.65+_vi3_p*(h*0.78/10)
+                    _sw_box(bm_pcie3,_px3_0+0.003,_px3_1-0.003,BACK_Y_3+0.0002,BACK_Y_3+0.0015,_vz3_p,_vz3_p+0.0015)
+            SCR3R=0.0022; SCR3T=0.0018; SCR3Y=BACK_Y_3+0.003; SCR3CZ=HH_3-0.006
+            _fvp3=[]; _bvp3=[]
+            for _si3_p in range(8):
+                _a3_p=math.pi/8+2*math.pi*_si3_p/8
+                _fvp3.append(bm_pcie3_scr.verts.new((_scx3_p+SCR3R*math.cos(_a3_p),SCR3Y,        SCR3CZ+SCR3R*math.sin(_a3_p))))
+                _bvp3.append(bm_pcie3_scr.verts.new((_scx3_p+SCR3R*math.cos(_a3_p),SCR3Y+SCR3T,  SCR3CZ+SCR3R*math.sin(_a3_p))))
+            _cfp3=bm_pcie3_scr.verts.new((_scx3_p,SCR3Y,       SCR3CZ))
+            _cbp3=bm_pcie3_scr.verts.new((_scx3_p,SCR3Y+SCR3T, SCR3CZ))
+            for _si3_p in range(8):
+                _n3_p=(_si3_p+1)%8
+                _sw_F(bm_pcie3_scr,[_fvp3[_si3_p],_fvp3[_n3_p],_bvp3[_n3_p],_bvp3[_si3_p]])
+                try: bm_pcie3_scr.faces.new([_cfp3,_fvp3[_n3_p],_fvp3[_si3_p]])
+                except: pass
+                try: bm_pcie3_scr.faces.new([_cbp3,_bvp3[_si3_p],_bvp3[_n3_p]])
+                except: pass
+        parts.append(_sw_mesh_obj(f"{name}_pcie_brackets", bm_pcie3,     col, 'M_DarkGrayMet'))
+        parts.append(_sw_mesh_obj(f"{name}_pcie_screws",   bm_pcie3_scr, col, 'M_DarkGrayMet'))
+
+        # Fan zone (3 modules)
+        bm_fan3=bmesh.new()
+        _fan3_mw=(_fan3_w-2*0.004)/3
+        for _fi3 in range(3):
+            _fx3_0=_fan3_x0+0.002+_fi3*(_fan3_mw+0.002); _fx3_1=_fx3_0+_fan3_mw
+            _sw_box(bm_fan3,_fx3_0+0.001,_fx3_1-0.001,BACK_Y_3,BACK_Y_3+0.002,-HH_3+0.002,HH_3-0.003)
+            _fh3_span=HH_3*1.60; _fh3_z0=-HH_3*0.80
+            for _bi3 in range(4):
+                _fbz3=_fh3_z0+_bi3*(_fh3_span/4)
+                _sw_box(bm_fan3,_fx3_0+0.004,_fx3_1-0.004,BACK_Y_3+0.004,BACK_Y_3+0.008,_fbz3,_fbz3+0.003)
+        parts.append(_sw_mesh_obj(f"{name}_fan_zone", bm_fan3, col, 'M_DarkGrayMet'))
+
+        # IO cluster: 3 RJ45, 2 USB rear, VGA, DB9
+        _build_rear_rj45_3u(_io3_x0+0.012, HH_3*0.40)
+        _build_rear_rj45_3u(_io3_x0+0.030, HH_3*0.40)
+        _build_rear_rj45_3u(_io3_x0+0.052, HH_3*0.40)
+        bm_io3_con.verts.ensure_lookup_table()
+        _n_io3_con=len(bm_io3_con.verts)//8
+        for _ci3 in range(_n_io3_con):
+            _b3c_=_ci3*8; _vs3_rc=bm_io3_con.verts[_b3c_:_b3c_+8]
+            for _f_idx3 in [(0,1,2,3),(4,7,6,5),(0,4,5,1),(3,2,6,7),(0,3,7,4),(1,5,6,2)]:
+                try: bm_io3_con.faces.new([_vs3_rc[_j3] for _j3 in _f_idx3])
+                except: pass
+        parts.append(_sw_mesh_obj(f"{name}_rear_rj45_housings", bm_io3_rj,  col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_rear_rj45_contacts", bm_io3_con, col, 'M_Gold'))
+
+        bm_io3_usb_r=bmesh.new()
+        USB3_OW_R=0.0130; USB3_OH_R=0.0060; USB3_IW_R=0.0100; USB3_IH_R=0.0035; USB3_D_R=0.0100
+        USB3_CX_R=_io3_x0+0.074
+        for _ui_r3,_USB3CZR in enumerate([-HH_3*0.15,-HH_3*0.42]):
+            _FYR3=BACK_Y_3+0.0005; _BYR3=_FYR3-USB3_D_R
+            _sw_box(bm_io3_usb_r,USB3_CX_R-USB3_OW_R/2,USB3_CX_R+USB3_OW_R/2,_FYR3,_FYR3+0.0008,_USB3CZR+USB3_IH_R/2,_USB3CZR+USB3_OH_R/2)
+            _sw_box(bm_io3_usb_r,USB3_CX_R-USB3_OW_R/2,USB3_CX_R+USB3_OW_R/2,_FYR3,_FYR3+0.0008,_USB3CZR-USB3_OH_R/2,_USB3CZR-USB3_IH_R/2)
+            _sw_box(bm_io3_usb_r,USB3_CX_R-USB3_OW_R/2,USB3_CX_R-USB3_IW_R/2,_FYR3,_FYR3+0.0008,_USB3CZR-USB3_OH_R/2,_USB3CZR+USB3_OH_R/2)
+            _sw_box(bm_io3_usb_r,USB3_CX_R+USB3_IW_R/2,USB3_CX_R+USB3_OW_R/2,_FYR3,_FYR3+0.0008,_USB3CZR-USB3_OH_R/2,_USB3CZR+USB3_OH_R/2)
+            for _wpr3 in [(USB3_CX_R-USB3_OW_R/2,USB3_CX_R+USB3_OW_R/2,_USB3CZR+USB3_IH_R/2,_USB3CZR+USB3_OH_R/2),
+                          (USB3_CX_R-USB3_OW_R/2,USB3_CX_R+USB3_OW_R/2,_USB3CZR-USB3_OH_R/2,_USB3CZR-USB3_IH_R/2),
+                          (USB3_CX_R-USB3_OW_R/2,USB3_CX_R-USB3_IW_R/2,_USB3CZR-USB3_OH_R/2,_USB3CZR+USB3_OH_R/2),
+                          (USB3_CX_R+USB3_IW_R/2,USB3_CX_R+USB3_OW_R/2,_USB3CZR-USB3_OH_R/2,_USB3CZR+USB3_OH_R/2)]:
+                _sw_box(bm_io3_usb_r,_wpr3[0],_wpr3[1],_BYR3,_FYR3,_wpr3[2],_wpr3[3])
+            _sw_box(bm_io3_usb_r,USB3_CX_R-USB3_OW_R/2,USB3_CX_R+USB3_OW_R/2,_BYR3,_BYR3+0.0005,_USB3CZR-USB3_OH_R/2,_USB3CZR+USB3_OH_R/2)
+            _sw_box(bm_io3_usb_r,USB3_CX_R-USB3_IW_R/2+0.001,USB3_CX_R+USB3_IW_R/2-0.001,_BYR3+0.001,_FYR3-0.002,_USB3CZR,_USB3CZR+USB3_IH_R/2-0.0003)
+        bm_io3_misc=bmesh.new()
+        _sw_box(bm_io3_misc,_io3_x0+0.090,_io3_x0+0.108,BACK_Y_3+0.001,BACK_Y_3+0.004,HH_3*0.25-0.0075,HH_3*0.25+0.0075)
+        _sw_box(bm_io3_misc,_io3_x0+0.090,_io3_x0+0.108,BACK_Y_3+0.001,BACK_Y_3+0.004,-HH_3*0.58-0.005,-HH_3*0.58+0.005)
+        parts.append(_sw_mesh_obj(f"{name}_usb_rear",     bm_io3_usb_r, col, 'M_PlasticDark'))
+        parts.append(_sw_mesh_obj(f"{name}_rear_io_misc", bm_io3_misc,  col, 'M_DarkGrayMet'))
+
+        # Rear background panel
+        bm_r3bg=bmesh.new()
+        def _rbg3(x0,x1,z0,z1): _sw_box(bm_r3bg,x0,x1,BACK_Y_3-0.002,BACK_Y_3,z0,z1)
+        # PCIe + fan zone: solid strip
+        _rbg3(_pcie3_x0, _psu3_x0L, -HH_3, HH_3)
+        # IO zone left margin + right gap strip
+        _rbg3(-HW_3, _io3_x0+0.004, -HH_3, HH_3)
+        _rbg3(_io3_x0+_io3_w, _pcie3_x0, -HH_3, HH_3)
+        # IO zone: tile around RJ45 openings (column-based to avoid Z overlap)
+        _RJ3_IHW = RJ3_IW / 2;  _RJ3_IHH = RJ3_IH / 2
+        _RJ3_CZ  = HH_3 * 0.40
+        _RJ3_Z0  = _RJ3_CZ - _RJ3_IHH;  _RJ3_Z1 = _RJ3_CZ + _RJ3_IHH
+        for _rjcx in [_io3_x0+0.012, _io3_x0+0.030, _io3_x0+0.052]:
+            _rx0 = _rjcx - _RJ3_IHW;  _rx1 = _rjcx + _RJ3_IHW
+            _rbg3(_rx0, _rx1, -HH_3, _RJ3_Z0)   # below RJ45 hole
+            _rbg3(_rx0, _rx1, _RJ3_Z1, HH_3)    # above RJ45 hole
+        # Solid columns between and around RJ45 ports
+        _rbg3(_io3_x0+0.004,                  _io3_x0+0.012-_RJ3_IHW, -HH_3, HH_3)
+        _rbg3(_io3_x0+0.012+_RJ3_IHW, _io3_x0+0.030-_RJ3_IHW, -HH_3, HH_3)
+        _rbg3(_io3_x0+0.030+_RJ3_IHW, _io3_x0+0.052-_RJ3_IHW, -HH_3, HH_3)
+        _rbg3(_io3_x0+0.052+_RJ3_IHW, USB3_CX_R-USB3_IW_R/2,  -HH_3, HH_3)
+        # USB column: tile around two holes at different Z
+        _USBRX3_X0 = USB3_CX_R - USB3_IW_R/2;  _USBRX3_X1 = USB3_CX_R + USB3_IW_R/2
+        _USB3R_1Z0 = -HH_3*0.15 - USB3_IH_R/2;  _USB3R_1Z1 = -HH_3*0.15 + USB3_IH_R/2
+        _USB3R_2Z0 = -HH_3*0.42 - USB3_IH_R/2;  _USB3R_2Z1 = -HH_3*0.42 + USB3_IH_R/2
+        _rbg3(_USBRX3_X0, _USBRX3_X1, -HH_3,          _USB3R_2Z0)
+        _rbg3(_USBRX3_X0, _USBRX3_X1, _USB3R_2Z1, _USB3R_1Z0)
+        _rbg3(_USBRX3_X0, _USBRX3_X1, _USB3R_1Z1, HH_3)
+        # VGA+DB9 zone → right edge of IO zone
+        _rbg3(_USBRX3_X1, _io3_x0+_io3_w, -HH_3, HH_3)
+        # PSU separators and right edge
+        _rbg3(_psu3_x1L,_psu3_x0R,-HH_3,HH_3)
+        _rbg3(_psu3_x1R,HW_3,-HH_3,HH_3)
+        for _pbx0_3,_pbx1_3 in [(_psu3_x0L,_psu3_x1L),(_psu3_x0R,_psu3_x1R)]:
+            _pcx3=(_pbx0_3+_pbx1_3)/2
+            _bgiz0_3=_IEC3_CZ-IEC_CUT_H_3/2; _bgiz1_3=_IEC3_CZ+IEC_CUT_H_3/2
+            _bgix0_3=_pcx3-IEC_CUT_W_3/2;    _bgix1_3=_pcx3+IEC_CUT_W_3/2
+            _rbg3(_pbx0_3,_bgix0_3,-HH_3,HH_3); _rbg3(_bgix1_3,_pbx1_3,-HH_3,HH_3)
+            _rbg3(_bgix0_3,_bgix1_3,-HH_3,_bgiz0_3); _rbg3(_bgix0_3,_bgix1_3,_bgiz1_3,HH_3)
+        parts.append(_sw_mesh_obj(f"{name}_rear_panel_bg",bm_r3bg,col,'M_Aluminum'))
+
+        # ── Translation: centred → equipment-origin ───────────────────────
+        tx, ty, tz = 0.0, d / 2, h / 2
+        for obj in parts[1:]:
+            me = obj.data
+            for v in me.vertices:
+                v.co.x += tx; v.co.y += ty; v.co.z += tz
+            me.update()
+            obj.hide_render = False
+        parts[0].hide_render = False
+
+        # ── Mounting ears + M6 screws (equipment-origin space) ────────────
+        ear_w_3u = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
+        ear_d_3u = 0.002; ear_h_3u = h * 0.68
+        for side_sign in (-1, 1):
+            side_label = 'L' if side_sign < 0 else 'R'
+            ear_cx_3u = side_sign * (w / 2 + ear_w_3u / 2)
+            bm_ear3 = bmesh.new()
+            _sw_box(bm_ear3,
+                    ear_cx_3u - ear_w_3u/2, ear_cx_3u + ear_w_3u/2,
+                    -ear_d_3u, 0.0,
+                    (h - ear_h_3u)/2, (h + ear_h_3u)/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_{side_label}", bm_ear3, col, 'M_Aluminum'))
+            SCR3_R_E=0.0038; SCR3_T_E=0.0028; SCR3_Y_E=-(ear_d_3u+0.001); SCR3_Z_E=h/2
+            bm_scr3e=bmesh.new(); fv3e=[]; bv3e=[]
+            for _i3e in range(8):
+                _a3e=math.pi/8+2*math.pi*_i3e/8
+                fv3e.append(bm_scr3e.verts.new((ear_cx_3u+SCR3_R_E*math.cos(_a3e),SCR3_Y_E,           SCR3_Z_E+SCR3_R_E*math.sin(_a3e))))
+                bv3e.append(bm_scr3e.verts.new((ear_cx_3u+SCR3_R_E*math.cos(_a3e),SCR3_Y_E+SCR3_T_E,  SCR3_Z_E+SCR3_R_E*math.sin(_a3e))))
+            cf3e=bm_scr3e.verts.new((ear_cx_3u,SCR3_Y_E,           SCR3_Z_E))
+            cb3e=bm_scr3e.verts.new((ear_cx_3u,SCR3_Y_E+SCR3_T_E,  SCR3_Z_E))
+            for _i3e in range(8):
+                _n3e=(_i3e+1)%8
+                _sw_F(bm_scr3e,[fv3e[_i3e],fv3e[_n3e],bv3e[_n3e],bv3e[_i3e]])
+                try: bm_scr3e.faces.new([cf3e,fv3e[_n3e],fv3e[_i3e]])
+                except: pass
+                try: bm_scr3e.faces.new([cb3e,bv3e[_i3e],bv3e[_n3e]])
+                except: pass
+            GRV3=0.0006; GRL3=SCR3_R_E*1.6
+            _sw_box(bm_scr3e,ear_cx_3u-GRL3/2,ear_cx_3u+GRL3/2,SCR3_Y_E-0.0003,SCR3_Y_E,SCR3_Z_E-GRV3/2,SCR3_Z_E+GRV3/2)
+            _sw_box(bm_scr3e,ear_cx_3u-GRV3/2,ear_cx_3u+GRV3/2,SCR3_Y_E-0.0003,SCR3_Y_E,SCR3_Z_E-GRL3/2,SCR3_Z_E+GRL3/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_screw_{side_label}", bm_scr3e, col, 'M_DarkGrayMet'))
+
+        if join_mesh:
+            joined_3u = _join_parts(parts, name)
+            bpy.ops.object.select_all(action='DESELECT')
+            joined_3u.select_set(True)
+            bpy.context.view_layer.objects.active = joined_3u
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.object.mode_set(mode='OBJECT')
+
     elif u_size <= 3:
-        # ── 2U / 3U front face ────────────────────────────────────────────
+        # ── 3U front face ─────────────────────────────────────────────────
         # Three zones left→right: expansion bays | main drive bay row | control
         # Proportions sum to 1.0 leaving 2.7% margins each side and 0.7% gaps:
         #   0.027 + 0.148 + 0.007 + 0.631 + 0.007 + 0.153 + 0.027 = 1.000
@@ -1623,7 +2832,7 @@ def create_server_chassis(
                 )
                 parts.append(vent)
 
-    if 1 < u_size <= 3 and qf["bezel"]:
+    if u_size > 3 and qf["bezel"]:
         # ── 2U / 3U rear panel: I/O cluster | PCIe zone | fan bay | dual PSU
         # Layout left→right (proportional, sums to w):
         #   0.146 (I/O) + 0.009 + 0.280 (PCIe) + 0.009 + 0.202 (fans) + 0.009 + 0.345 (PSUs)
