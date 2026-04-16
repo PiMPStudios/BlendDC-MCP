@@ -4407,17 +4407,44 @@ def create_pdu(
             material='M_PlasticDark'))
 
     def _c14(tag, cx, cz, fy):
-        """C14 IEC inlet (1U right end)."""
-        # Outer bezel
-        parts.append(_create_box_object(f"{tag}_c14_hsg",
-            cx=cx, cy=fy - 0.0010, cz=cz,
-            w=0.034, d=0.0020, h=0.022, collection=col,
-            material='M_DarkGrayMet'))
-        # Recessed back face (8 mm)
+        """C14 IEC inlet (1U right end) — 5-wall recess + 2 mounting screws."""
+        hw, hh = 0.030, 0.024   # socket outer dims (real C14 ≈ 30 × 24 mm)
+        rd  = 0.0080            # 8 mm recess depth
+        wt  = 0.0015            # wall thickness
+        fr  = 0.002             # bezel frame width
+
+        # 4-bar frame proud of face
+        _bm_cf = bmesh.new()
+        _sw_box(_bm_cf, cx-hw/2-fr, cx+hw/2+fr, fy-0.002, fy, cz+hh/2,    cz+hh/2+fr)
+        _sw_box(_bm_cf, cx-hw/2-fr, cx+hw/2+fr, fy-0.002, fy, cz-hh/2-fr, cz-hh/2)
+        _sw_box(_bm_cf, cx-hw/2-fr, cx-hw/2,    fy-0.002, fy, cz-hh/2,    cz+hh/2)
+        _sw_box(_bm_cf, cx+hw/2,    cx+hw/2+fr, fy-0.002, fy, cz-hh/2,    cz+hh/2)
+        parts.append(_sw_mesh_obj(f"{tag}_c14_frame", _bm_cf, col, 'M_DarkGrayMet'))
+
+        # 5-wall recess housing (open front)
+        _bm_ch = bmesh.new()
+        ry0, ry1 = fy, fy + rd
+        _sw_box(_bm_ch, cx-hw/2,    cx+hw/2,    ry0, ry1, cz+hh/2,    cz+hh/2+wt)
+        _sw_box(_bm_ch, cx-hw/2,    cx+hw/2,    ry0, ry1, cz-hh/2-wt, cz-hh/2)
+        _sw_box(_bm_ch, cx-hw/2-wt, cx-hw/2,    ry0, ry1, cz-hh/2-wt, cz+hh/2+wt)
+        _sw_box(_bm_ch, cx+hw/2,    cx+hw/2+wt, ry0, ry1, cz-hh/2-wt, cz+hh/2+wt)
+        _sw_box(_bm_ch, cx-hw/2,    cx+hw/2,    ry1-wt,   ry1, cz-hh/2, cz+hh/2)
+        parts.append(_sw_mesh_obj(f"{tag}_c14_hsg", _bm_ch, col, 'M_PlasticDark'))
+
+        # Socket face at back of recess
         parts.append(_create_box_object(f"{tag}_c14_face",
-            cx=cx, cy=fy + 0.0080, cz=cz,
-            w=0.026, d=0.0025, h=0.014, collection=col,
+            cx=cx, cy=fy + rd - 0.001, cz=cz,
+            w=hw - 0.002, d=0.002, h=hh - 0.002, collection=col,
             material='M_PlasticDark'))
+
+        # 2 mounting screws visible above and below the socket (as in reference)
+        scr_r = 0.0035   # screw head radius (7 mm head)
+        scr_d = 0.002
+        for scr_z, slbl in [(cz + hh/2 + 0.007, "T"), (cz - hh/2 - 0.007, "B")]:
+            parts.append(_create_box_object(f"{tag}_c14_scr{slbl}",
+                cx=cx, cy=fy - scr_d / 2, cz=scr_z,
+                w=scr_r * 2, d=scr_d, h=scr_r * 2, collection=col,
+                material='M_DarkGrayMet'))
 
     # ═════════════════════════════════════════════════════════════════════
     # 0U VERTICAL STRIP
@@ -4682,16 +4709,16 @@ def create_pdu(
             outlet_xs.append(ox)
             if qf["server_bays"]:
                 _c13(f"{name}_c13_{i:02d}", cx=ox, cz=out_z,
-                     fy=fy_1u, portrait=False)
+                     fy=fy_1u, portrait=True)   # portrait: ground pin at top, matches real PDU
 
         # Recessed outlet zone background — tiled AROUND each outlet aperture
-        # (solid plate would block the recessed socket faces)
-        # Landscape C13 inner aperture: 0.034 wide × 0.026 tall → half = 0.017 / 0.013
+        # Portrait C13: hw=0.034, hh=0.038, fr=0.002
+        # Outer half-extents: AP_HW = hw/2+fr = 0.019, AP_HH = hh/2+fr = 0.021
         if qf["server_bays"]:
-            _AP_HW = 0.021   # housing outer half-width  (hw=0.038 + 2×fr=0.004)/2
-            _AP_HH = 0.017   # housing outer half-height (hh=0.030 + 2×fr=0.004)/2
-            _BG_Z0 = out_z - h_pdu * 0.40
-            _BG_Z1 = out_z + h_pdu * 0.40
+            _AP_HW = 0.019   # portrait C13 outer half-width  (hw=0.034 + 2×fr=0.004)/2
+            _AP_HH = 0.021   # portrait C13 outer half-height (hh=0.038 + 2×fr=0.004)/2
+            _BG_Z0 = 0.0              # full body height — portrait outlets nearly fill 1U
+            _BG_Z1 = h_pdu
             _BG_X0 = out_x0
             _BG_X1 = out_x0 + OUT_ZONE
             _AP_Z0 = out_z - _AP_HH
@@ -4724,6 +4751,24 @@ def create_pdu(
         inlet_cx = w_pdu / 2 - INLET_W / 2 - R_MARGIN
         if qf["server_bays"]:
             _c14(f"{name}", cx=inlet_cx, cz=out_z, fy=fy_1u)
+
+            # Right-side body cover — R_MARGIN + inlet zone (X: out_x0+OUT_ZONE → w_pdu/2)
+            # Tiled at Y=0 (body face level) around C14 outer aperture so PDU interior
+            # doesn't show through the deleted body front face.
+            _rc_x0 = out_x0 + OUT_ZONE;  _rc_x1 = w_pdu / 2
+            _c14_hw = 0.030 / 2 + 0.002  # hw/2 + fr
+            _c14_hh = 0.024 / 2 + 0.002  # hh/2 + fr
+            _c14_ax0 = inlet_cx - _c14_hw;  _c14_ax1 = inlet_cx + _c14_hw
+            _c14_az0 = out_z    - _c14_hh;  _c14_az1 = out_z    + _c14_hh
+            _bm_rc = bmesh.new()
+            def _rc(x0, x1, z0, z1):
+                if x1 > x0 and z1 > z0:
+                    _sw_box(_bm_rc, x0, x1, -0.0002, 0.0002, z0, z1)
+            _rc(_rc_x0, _rc_x1, _c14_az1, h_pdu)      # above C14
+            _rc(_rc_x0, _rc_x1, 0.0,      _c14_az0)   # below C14
+            _rc(_rc_x0, _c14_ax0, _c14_az0, _c14_az1) # left of C14
+            _rc(_c14_ax1, _rc_x1, _c14_az0, _c14_az1) # right of C14
+            parts.append(_sw_mesh_obj(f"{name}_inlet_bc", _bm_rc, col, None))
 
         # Metered zone (left side): ammeter display + circuit breaker + LED
         meter_cx = -w_pdu / 2 + METER_W / 2
