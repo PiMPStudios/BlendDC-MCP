@@ -132,7 +132,10 @@ def _get_server_app():
         "facility_tools",
         "polish_tools",
     ):
-        if _mod_name in sys.modules:
+        _fq = f"blenddc_mcp.{_mod_name}"
+        if _fq in sys.modules:
+            importlib.reload(sys.modules[_fq])
+        elif _mod_name in sys.modules:
             importlib.reload(sys.modules[_mod_name])
 
     _server_was_loaded = "server" in sys.modules

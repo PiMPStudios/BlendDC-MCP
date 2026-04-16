@@ -553,11 +553,21 @@ def create_server_chassis(
                     bpy.data.curves.remove(fc_data)
                 parts.append(_sw_mesh_obj(f"{name}_bay_labels", bm_lbl_carr, col, 'M_White'))
 
-        # ── Control panel ────────────────────────────────────────────────
+        # ── Control panel — tiled around USB cutouts ──────────────────────
         bm_ctrl = bmesh.new()
-        _sw_box(bm_ctrl, CTRL_X0 + 0.001, CTRL_X1 - 0.001,
-                FRONT_Y + 0.0020, FRONT_Y - 0.0005,
-                BAY_Z0 + 0.001, BAY_Z1 - 0.001)
+        _CB_X0 = CTRL_X0 + 0.001;  _CB_X1 = CTRL_X1 - 0.001
+        _CB_Y0 = FRONT_Y - 0.0005; _CB_Y1 = FRONT_Y + 0.0020
+        _CB_Z0 = BAY_Z0 + 0.001;   _CB_Z1 = BAY_Z1 - 0.001
+        # Combined Z extent of both USB ports (outer frame) — values match line 665
+        _USB_OW = 0.0130; _USB_OH = 0.0060
+        _USB_CX = CTRL_CX - 0.008
+        _USB_X0 = _USB_CX - _USB_OW / 2; _USB_X1 = _USB_CX + _USB_OW / 2
+        _USB_Z0 = min(-HH * 0.30, -HH * 0.52) - _USB_OH / 2
+        _USB_Z1 = max(-HH * 0.30, -HH * 0.52) + _USB_OH / 2
+        _sw_box(bm_ctrl, _CB_X0,  _USB_X0, _CB_Y0, _CB_Y1, _CB_Z0, _CB_Z1)  # left of USB
+        _sw_box(bm_ctrl, _USB_X1, _CB_X1,  _CB_Y0, _CB_Y1, _CB_Z0, _CB_Z1)  # right of USB
+        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _CB_Z0, _USB_Z0)  # below USB
+        _sw_box(bm_ctrl, _USB_X0, _USB_X1, _CB_Y0, _CB_Y1, _USB_Z1, _CB_Z1)  # above USB
         parts.append(_sw_mesh_obj(f"{name}_ctrl_bg", bm_ctrl, col, 'M_DarkGrayMet'))
 
         # Power button — 8-sided cap head
@@ -800,6 +810,19 @@ def create_server_chassis(
             for i in range(4):
                 _sw_F(bm_flg_all, [f0_v2[i], f1_v2[i], f1_v2[(i+1)%4], f0_v2[(i+1)%4]])
 
+            # Side rails — extend flange side strips up both sides to PSU face top
+            _FLG_SIDE_W = (IEC_FLG_W_s - IEC_CUT_W_s) / 2   # matches flange side strip width
+            _PSU_Z_TOP  =  HH - 0.003                          # PSU face top edge
+            if oz1_iec < _PSU_Z_TOP:
+                _sw_box(bm_flg_all,
+                        ox0_iec, ox0_iec + _FLG_SIDE_W,
+                        FLG_Y0_iec, FLG_Y1_iec,
+                        oz1_iec, _PSU_Z_TOP)                   # left rail up
+                _sw_box(bm_flg_all,
+                        ox1_iec - _FLG_SIDE_W, ox1_iec,
+                        FLG_Y0_iec, FLG_Y1_iec,
+                        oz1_iec, _PSU_Z_TOP)                   # right rail up
+
             # IEC screws (2 per inlet)
             SR_iec = 0.002; ST_iec = 0.001; NS_iec = 12
             for scx_iec in [CX_iec - (IEC_CUT_W_s/2 + (IEC_FLG_W_s/2 - IEC_CUT_W_s/2)/2),
@@ -848,9 +871,9 @@ def create_server_chassis(
             # IEC C14 at each PSU
             _build_iec_at(psu_cx_l, -HH * 0.35)
 
-            # Exhaust slots — confined between IEC top and handle bar
+            # Exhaust slots — confined between IEC flange top and handle bar
             _IEC_CZ  = -HH * 0.35
-            _EX_Z0   = _IEC_CZ + IEC_CUT_H_s / 2 + 0.0030   # 3mm above IEC top
+            _EX_Z0   = _IEC_CZ + IEC_FLG_H_s / 2 + 0.0020   # 2mm above flange top (not cutout)
             _EX_Z1   = HH - 0.0080                            # clear of handle bar
             _N_EXHST = 5; _SL_H = 0.0011
             _gap     = max(0.0006, (_EX_Z1 - _EX_Z0 - _N_EXHST * _SL_H) / (_N_EXHST - 1))
@@ -858,7 +881,7 @@ def create_server_chassis(
                 ez = _EX_Z0 + ei * (_SL_H + _gap)
                 _sw_box(bm_psu_exhaust,
                         psu_x0 + 0.006, psu_x1 - 0.006,
-                        BACK_Y + 0.0005, BACK_Y + 0.002,
+                        BACK_Y + 0.0020, BACK_Y + 0.0025,
                         ez, ez + _SL_H)
 
             # PSU LED
