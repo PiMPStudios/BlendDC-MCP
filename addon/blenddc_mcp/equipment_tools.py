@@ -4341,36 +4341,53 @@ def create_pdu(
 
     def _c13(tag, cx, cz, fy, portrait):
         """
-        C13 outlet: open-frame bezel + dark socket face + optional 3-pin stubs.
+        C13 outlet: open-frame bezel + recessed socket cavity + optional 3-pin stubs.
         portrait=True  → taller than wide  (0U column layout)
         portrait=False → wider than tall   (1U row layout)
-        The bezel is 4 border bars (not a solid box) so the socket face is visible.
+        The bezel is 4 border bars; the socket face is 8 mm deep inside a 5-wall
+        recess housing (open front), matching a real IEC C13 inlet geometry.
         """
         hw, hh = (0.034, 0.038) if portrait else (0.038, 0.030)
         fr  = 0.002   # frame rail width (2 mm)
-        fd  = 0.0020  # frame depth (2 mm proud)
-        # 4-bar open frame — leaves the socket opening clear
+        fd  = 0.0020  # frame proud depth (2 mm in front of face)
+        rd  = 0.0080  # recess depth (8 mm — real C13 socket depth)
+        wt  = 0.0015  # recess wall thickness
+
+        # 4-bar open frame — sits proud of face, leaves socket opening clear
         _bm_fr = bmesh.new()
-        _sw_box(_bm_fr, cx-hw/2-fr, cx+hw/2+fr, fy-fd, fy, cz+hh/2,     cz+hh/2+fr)  # top
-        _sw_box(_bm_fr, cx-hw/2-fr, cx+hw/2+fr, fy-fd, fy, cz-hh/2-fr,  cz-hh/2)     # bottom
-        _sw_box(_bm_fr, cx-hw/2-fr, cx-hw/2,    fy-fd, fy, cz-hh/2,     cz+hh/2)     # left
-        _sw_box(_bm_fr, cx+hw/2,    cx+hw/2+fr, fy-fd, fy, cz-hh/2,     cz+hh/2)     # right
+        _sw_box(_bm_fr, cx-hw/2-fr, cx+hw/2+fr, fy-fd, fy, cz+hh/2,    cz+hh/2+fr)  # top
+        _sw_box(_bm_fr, cx-hw/2-fr, cx+hw/2+fr, fy-fd, fy, cz-hh/2-fr, cz-hh/2)     # bottom
+        _sw_box(_bm_fr, cx-hw/2-fr, cx-hw/2,    fy-fd, fy, cz-hh/2,    cz+hh/2)     # left
+        _sw_box(_bm_fr, cx+hw/2,    cx+hw/2+fr, fy-fd, fy, cz-hh/2,    cz+hh/2)     # right
         parts.append(_sw_mesh_obj(f"{tag}_frame", _bm_fr, col, 'M_DarkGrayMet'))
-        # Dark socket face — slightly proud of body, visible through frame opening
+
+        # 5-wall recess housing: four side walls + back wall, open front
+        # Walls run from face (fy) back to recess depth (fy + rd)
+        _bm_hsg = bmesh.new()
+        ry0, ry1 = fy, fy + rd
+        _sw_box(_bm_hsg, cx-hw/2,    cx+hw/2,    ry0, ry1, cz+hh/2,    cz+hh/2+wt) # top wall
+        _sw_box(_bm_hsg, cx-hw/2,    cx+hw/2,    ry0, ry1, cz-hh/2-wt, cz-hh/2)    # bottom wall
+        _sw_box(_bm_hsg, cx-hw/2-wt, cx-hw/2,    ry0, ry1, cz-hh/2-wt, cz+hh/2+wt)# left wall
+        _sw_box(_bm_hsg, cx+hw/2,    cx+hw/2+wt, ry0, ry1, cz-hh/2-wt, cz+hh/2+wt)# right wall
+        _sw_box(_bm_hsg, cx-hw/2,    cx+hw/2,    ry1-wt, ry1, cz-hh/2, cz+hh/2)   # back wall
+        parts.append(_sw_mesh_obj(f"{tag}_hsg", _bm_hsg, col, 'M_PlasticDark'))
+
+        # Socket face — dark slab sitting 1 mm in front of back wall
         parts.append(_create_box_object(f"{tag}_face",
-            cx=cx, cy=fy + 0.0005, cz=cz,
-            w=hw, d=0.0015, h=hh, collection=col,
+            cx=cx, cy=fy + rd - 0.0010, cz=cz,
+            w=hw - 0.002, d=0.0015, h=hh - 0.002, collection=col,
             material='M_PlasticDark'))
-        if qf["bay_3d"]:   # IEC 3-pin aperture stubs (gold)
+
+        if qf["bay_3d"]:   # IEC 3-pin aperture stubs (gold), deep inside recess
             gz_off = hh * 0.28 if portrait else 0.0
             parts.append(_create_box_object(f"{tag}_gnd",
-                cx=cx, cy=fy - 0.0005, cz=cz + gz_off,
+                cx=cx, cy=fy + rd - 0.002, cz=cz + gz_off,
                 w=0.005, d=0.003, h=0.010 if portrait else 0.005,
                 collection=col, material='M_Gold'))
             for sx, lbl in [(-1, "L"), (1, "N")]:
                 pz_off = -hh * 0.18 if portrait else 0.0
                 parts.append(_create_box_object(f"{tag}_pin{lbl}",
-                    cx=cx + sx * hw * 0.30, cy=fy - 0.0005, cz=cz + pz_off,
+                    cx=cx + sx * hw * 0.30, cy=fy + rd - 0.002, cz=cz + pz_off,
                     w=0.004, d=0.003, h=0.010 if portrait else 0.005,
                     collection=col, material='M_Gold'))
 
