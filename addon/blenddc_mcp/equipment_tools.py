@@ -4805,31 +4805,28 @@ def create_pdu(
                     _rj1_fy0, _rj1_fy1,
                     _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # right
             parts.append(_sw_mesh_obj(f"{name}_rj_bezel", _bm_rj1_bez, col, 'M_DarkGrayMet'))
-            # RJ45 dark port recess — open front (no front face) so cavity is visible
+            # RJ45 dark port recess — open front, 11mm deep
             _rx0 = _MGT_CX - _RJ1_IW / 2;  _rx1 = _MGT_CX + _RJ1_IW / 2
-            _ry0 = fy_1u;                   _ry1 = fy_1u + 0.0060
+            _ry0 = fy_1u;                   _ry1 = fy_1u + 0.0110   # 11mm deep
             _rz0 = _RJ1_CZ - _RJ1_IH / 2;  _rz1 = _RJ1_CZ + _RJ1_IH / 2
+            _wt  = 0.0005   # 0.5mm wall thickness
             _bm_rj1_recess = bmesh.new()
-            # back wall
-            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry1 - 0.0004, _ry1, _rz0, _rz1)
-            # top wall
-            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz1 - 0.0004, _rz1)
-            # bottom wall
-            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz0, _rz0 + 0.0004)
-            # left wall
-            _sw_box(_bm_rj1_recess, _rx0, _rx0 + 0.0004, _ry0, _ry1, _rz0, _rz1)
-            # right wall
-            _sw_box(_bm_rj1_recess, _rx1 - 0.0004, _rx1, _ry0, _ry1, _rz0, _rz1)
+            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry1 - _wt, _ry1, _rz0, _rz1)  # back
+            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz1 - _wt, _rz1)  # top
+            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz0, _rz0 + _wt)  # bottom
+            _sw_box(_bm_rj1_recess, _rx0, _rx0 + _wt, _ry0, _ry1, _rz0, _rz1)  # left
+            _sw_box(_bm_rj1_recess, _rx1 - _wt, _rx1, _ry0, _ry1, _rz0, _rz1)  # right
             parts.append(_sw_mesh_obj(f"{name}_rj_recess", _bm_rj1_recess, col, 'M_PlasticDark'))
-            # 8 gold contact pins
+            # 8 gold contact strips — thin (0.25mm each), running front-to-back along bottom
             _bm_rj1_pins = bmesh.new()
-            _rj1_pw = _RJ1_IW / 10
+            _rj1_pitch = _RJ1_IW / 8          # spacing between contacts
+            _rj1_cw    = 0.00025               # 0.25mm contact width
             for _pi1 in range(8):
-                _rpx1_0 = _MGT_CX - _RJ1_IW / 2 + _pi1 * (_RJ1_IW / 8) + _rj1_pw * 0.15
-                _rpx1_1 = _rpx1_0 + _rj1_pw * 0.70
+                _rpx1_0 = _rx0 + _pi1 * _rj1_pitch + (_rj1_pitch - _rj1_cw) / 2
+                _rpx1_1 = _rpx1_0 + _rj1_cw
                 _sw_box(_bm_rj1_pins, _rpx1_0, _rpx1_1,
-                        fy_1u + 0.0020, fy_1u + 0.0045,
-                        _RJ1_CZ - _RJ1_IH / 2 + 0.001, _RJ1_CZ - _RJ1_IH / 2 + 0.004)
+                        fy_1u + 0.0020, fy_1u + 0.0090,
+                        _rz0 + _wt, _rz0 + 0.0060)  # rise from floor
             parts.append(_sw_mesh_obj(f"{name}_rj_pins", _bm_rj1_pins, col, 'M_Gold'))
             # Two status LEDs — neat horizontal pair just below the display
             if qf["led_emissive"]:
