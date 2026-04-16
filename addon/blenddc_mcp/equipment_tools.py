@@ -4616,9 +4616,22 @@ def create_pdu(
         w_pdu     = EIA_EQUIPMENT_BODY_M   # 446 mm body
         d_pdu     = 0.200
 
-        parts.append(_create_box_object(f"{name}_body",
+        _body_obj = _create_box_object(f"{name}_body",
             cx=0.0, cy=d_pdu / 2, cz=h_pdu / 2,
-            w=w_pdu, d=d_pdu, h=h_pdu, collection=col))
+            w=w_pdu, d=d_pdu, h=h_pdu, collection=col)
+        # Delete the body's front face (at y = -d_pdu/2 in local space = Y=0 in world).
+        # Tiled front panels (mgt_bc, out_bg, bz strips) own this surface instead,
+        # so port openings are never blocked by the solid body face.
+        _bm_body = bmesh.new()
+        _bm_body.from_mesh(_body_obj.data)
+        _front_y_local = -(d_pdu / 2)
+        _del_faces = [f for f in _bm_body.faces
+                      if all(abs(v.co.y - _front_y_local) < 1e-4 for v in f.verts)]
+        bmesh.ops.delete(_bm_body, geom=_del_faces, context='FACES')
+        _bm_body.to_mesh(_body_obj.data)
+        _bm_body.free()
+        _body_obj.data.update()
+        parts.append(_body_obj)
 
         bz_d = RACK_SHEET_THICK_M
         bz_y = -bz_d / 2
@@ -4810,47 +4823,84 @@ def create_pdu(
             _fp(_ap_x1, _fp_x1, _ap_z0, _ap_z1)          # right of RJ45
             parts.append(_sw_mesh_obj(f"{name}_mgt_fp", _bm_fp, col, 'M_DarkGrayMet'))
 
-            # RJ45 bezel — open 4-bar frame proud of face panel
-            _rj1_fy0 = fy_1u - 0.0018;  _rj1_fy1 = fy_1u   # 1.8mm proud
-            _bm_rj1_bez = bmesh.new()
-            _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX + _rj1_ow2,
-                    _rj1_fy0, _rj1_fy1,
-                    _RJ1_CZ + _rj1_ih2, _RJ1_CZ + _rj1_oh2)   # top
-            _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX + _rj1_ow2,
-                    _rj1_fy0, _rj1_fy1,
-                    _RJ1_CZ - _rj1_oh2, _RJ1_CZ - _rj1_ih2)   # bottom
-            _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX - _rj1_iw2,
-                    _rj1_fy0, _rj1_fy1,
-                    _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # left
-            _sw_box(_bm_rj1_bez, _MGT_CX + _rj1_iw2, _MGT_CX + _rj1_ow2,
-                    _rj1_fy0, _rj1_fy1,
-                    _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # right
-            parts.append(_sw_mesh_obj(f"{name}_rj_bezel", _bm_rj1_bez, col, 'M_DarkGrayMet'))
+            # RJ45 housing — same approach as reference switch builder:
+            # outer shell + chamfered inner mouth + inner tunnel + flat contact pads
+            _OD   = 0.0120          # 12mm housing depth
+            _WL   = 0.0014          # 1.4mm wall (matches switch spec)
+            _IW2  = _rj1_iw2 - _WL + _rj1_ow2 - _rj1_ow2   # recompute from OW/WALL
+            _CH   = 0.0005          # 0.5mm chamfer on inner mouth
+            # actual inner half-extents from wall subtraction
+            _hiw2 = _rj1_ow2 - _WL   # 0.009 - 0.0014 = 0.0076
+            _hih2 = _rj1_oh2 - _WL   # 0.0065 - 0.0014 = 0.0051
+            _py0  = fy_1u - 0.0015   # housing front (1.5mm proud of face)
+            _py1  = _py0 + _OD       # housing back
+            _px   = _MGT_CX;  _pz = _RJ1_CZ
 
-            # RJ45 port recess — open front, 11mm deep
-            _rx0 = _MGT_CX - _rj1_iw2;  _rx1 = _MGT_CX + _rj1_iw2
-            _ry0 = fy_1u;                _ry1 = fy_1u + 0.0110
-            _rz0 = _RJ1_CZ - _rj1_ih2;  _rz1 = _RJ1_CZ + _rj1_ih2
-            _wt  = 0.0005
-            _bm_rj1_recess = bmesh.new()
-            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry1 - _wt, _ry1, _rz0, _rz1)  # back
-            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz1 - _wt, _rz1)  # top
-            _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz0, _rz0 + _wt)  # bottom
-            _sw_box(_bm_rj1_recess, _rx0, _rx0 + _wt, _ry0, _ry1, _rz0, _rz1)  # left
-            _sw_box(_bm_rj1_recess, _rx1 - _wt, _rx1, _ry0, _ry1, _rz0, _rz1)  # right
-            parts.append(_sw_mesh_obj(f"{name}_rj_recess", _bm_rj1_recess, col, 'M_PlasticDark'))
+            _bm_h = bmesh.new()
+            def _V(p): return _bm_h.verts.new(p)
+            def _Fh(vs):
+                try: _bm_h.faces.new(vs)
+                except: pass
 
-            # 8 gold contacts — 0.25mm wide, 2mm tall at the bottom of the cavity
-            _bm_rj1_pins = bmesh.new()
-            _rj1_pitch = (_rx1 - _rx0) / 8
-            _rj1_cw    = 0.00025
+            om = [_V((_px-_rj1_ow2, _py0, _pz-_rj1_oh2)),
+                  _V((_px+_rj1_ow2, _py0, _pz-_rj1_oh2)),
+                  _V((_px+_rj1_ow2, _py0, _pz+_rj1_oh2)),
+                  _V((_px-_rj1_ow2, _py0, _pz+_rj1_oh2))]
+            im = [_V((_px-_hiw2+_CH, _py0, _pz-_hih2+_CH)),
+                  _V((_px+_hiw2-_CH, _py0, _pz-_hih2+_CH)),
+                  _V((_px+_hiw2-_CH, _py0, _pz+_hih2-_CH)),
+                  _V((_px-_hiw2+_CH, _py0, _pz+_hih2-_CH))]
+            od = [_V((_px-_rj1_ow2, _py1, _pz-_rj1_oh2)),
+                  _V((_px+_rj1_ow2, _py1, _pz-_rj1_oh2)),
+                  _V((_px+_rj1_ow2, _py1, _pz+_rj1_oh2)),
+                  _V((_px-_rj1_ow2, _py1, _pz+_rj1_oh2))]
+            ib = [_V((_px-_hiw2, _py1-_WL, _pz-_hih2)),
+                  _V((_px+_hiw2, _py1-_WL, _pz-_hih2)),
+                  _V((_px+_hiw2, _py1-_WL, _pz+_hih2)),
+                  _V((_px-_hiw2, _py1-_WL, _pz+_hih2))]
+
+            # front frame (4 chamfered annular faces)
+            _Fh([om[0],om[1],im[1],im[0]]); _Fh([om[2],om[3],im[3],im[2]])
+            _Fh([om[3],om[0],im[0],im[3]]); _Fh([om[1],om[2],im[2],im[1]])
+            # outer sides + back
+            _Fh([om[0],od[0],od[1],om[1]]); _Fh([om[2],od[2],od[3],om[3]])
+            _Fh([om[3],od[3],od[2],om[2]]); _Fh([om[3],om[0],od[0],od[3]])
+            _Fh([om[1],od[1],od[2],om[2]]); _Fh([od[0],od[3],od[2],od[1]])
+            # inner tunnel walls + back
+            _Fh([im[0],im[1],ib[1],ib[0]]); _Fh([im[2],im[3],ib[3],ib[2]])
+            _Fh([im[3],im[0],ib[0],ib[3]]); _Fh([im[1],im[2],ib[2],ib[1]])
+            _Fh([ib[0],ib[1],ib[2],ib[3]])
+            parts.append(_sw_mesh_obj(f"{name}_rj_housing", _bm_h, col, 'M_PlasticDark'))
+
+            # Body-face occlude — tiled 0.1mm in front of the solid body face (Y=0)
+            # so the body doesn't show through the inner RJ45 tunnel.
+            # Tiles the management zone around the inner aperture (_hiw2 × _hih2).
+            _bm_bc  = bmesh.new()
+            _bc_y0  = -0.0002;  _bc_y1 = 0.0002   # straddle Y=0
+            _ia_x0  = _MGT_CX - _hiw2;  _ia_x1 = _MGT_CX + _hiw2
+            _ia_z0  = _RJ1_CZ - _hih2;  _ia_z1 = _RJ1_CZ + _hih2
+            _bc_mx0 = -w_pdu / 2;       _bc_mx1 = out_x0
+            def _bc(x0, x1, z0, z1):
+                if x1 > x0 and z1 > z0:
+                    _sw_box(_bm_bc, x0, x1, _bc_y0, _bc_y1, z0, z1)
+            _bc(_bc_mx0, _bc_mx1, _ia_z1, h_pdu)   # above inner aperture
+            _bc(_bc_mx0, _bc_mx1, 0.0,    _ia_z0)  # below inner aperture
+            _bc(_bc_mx0, _ia_x0,  _ia_z0, _ia_z1)  # left of inner aperture
+            _bc(_ia_x1,  _bc_mx1, _ia_z0, _ia_z1)  # right of inner aperture
+            parts.append(_sw_mesh_obj(f"{name}_mgt_bc", _bm_bc, col, None))
+
+            # 8 gold contacts — flat pads projecting from back wall into cavity
+            _bm_c = bmesh.new()
+            _pin_y1 = _py1 - _WL - 0.0001       # flush with inner back face (tiny gap avoids z-fight)
+            _pin_y0 = _pin_y1 - 0.0003          # 0.3mm projection into tunnel
+            _pin_z0 = _pz - _hih2 + 0.0010
+            _pin_z1 = _pin_z0 + 0.0011           # 1.1mm tall
+            _pin_sp = (_hiw2 * 2) / 9            # IW / (N+1) spacing
             for _pi1 in range(8):
-                _rpx1_0 = _rx0 + _pi1 * _rj1_pitch + (_rj1_pitch - _rj1_cw) / 2
-                _rpx1_1 = _rpx1_0 + _rj1_cw
-                _sw_box(_bm_rj1_pins, _rpx1_0, _rpx1_1,
-                        _ry0 + 0.0020, _ry0 + 0.0080,   # 2–8mm depth
-                        _rz0 + _wt, _rz0 + 0.0020)      # 2mm rise from floor
-            parts.append(_sw_mesh_obj(f"{name}_rj_pins", _bm_rj1_pins, col, 'M_Gold'))
+                _ppx = (_px - _hiw2) + (_pi1 + 1) * _pin_sp
+                _sw_box(_bm_c, _ppx-0.0003, _ppx+0.0003,
+                        _pin_y0, _pin_y1, _pin_z0, _pin_z1)
+            parts.append(_sw_mesh_obj(f"{name}_rj_pins", _bm_c, col, 'M_Gold'))
             # Two status LEDs — neat horizontal pair just below the display
             if qf["led_emissive"]:
                 _bm_sleds1 = bmesh.new()
