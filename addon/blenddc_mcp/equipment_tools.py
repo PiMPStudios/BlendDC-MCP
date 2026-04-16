@@ -454,9 +454,9 @@ def create_server_chassis(
             bm_leds_write = bmesh.new()
 
             _lbl_objs_carr = []
-            LABEL_SIZE = 0.0008
-            LABEL_EXT  = 0.00010
-            LABEL_Y_carr = FRONT_Y - 0.0002
+            LABEL_SIZE = 0.0030
+            LABEL_EXT  = 0.00030
+            LABEL_Y_carr = FRONT_Y - 0.0020   # sits on carrier front face (CARR_Y1)
 
             def _add_carr_lbl(text_str, lx, lz):
                 fc = bpy.data.curves.new("_srv_lbl_fc", type='FONT')
@@ -528,7 +528,7 @@ def create_server_chassis(
 
                     if qf["bezel"]:
                         # Drive bay label
-                        _add_carr_lbl(str(idx + 1), cx, cz + carrier_h / 2 - 0.0040)
+                        _add_carr_lbl(str(idx + 1), cx, cz + carrier_h / 2 - 0.0025)
 
             parts.append(_sw_mesh_obj(f"{name}_carrier_faces",       bm_carriers,   col, 'M_PlasticDark'))
             parts.append(_sw_mesh_obj(f"{name}_carrier_vents",       bm_vents,      col, 'M_Black'))
