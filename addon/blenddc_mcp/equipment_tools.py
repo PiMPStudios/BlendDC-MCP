@@ -813,19 +813,6 @@ def create_server_chassis(
             for i in range(4):
                 _sw_F(bm_flg_all, [f0_v2[i], f1_v2[i], f1_v2[(i+1)%4], f0_v2[(i+1)%4]])
 
-            # Side rails — extend flange side strips up both sides to PSU face top
-            _FLG_SIDE_W = (IEC_FLG_W_s - IEC_CUT_W_s) / 2   # matches flange side strip width
-            _PSU_Z_TOP  =  HH - 0.003                          # PSU face top edge
-            if oz1_iec < _PSU_Z_TOP:
-                _sw_box(bm_flg_all,
-                        ox0_iec, ox0_iec + _FLG_SIDE_W,
-                        FLG_Y0_iec, FLG_Y1_iec,
-                        oz1_iec, _PSU_Z_TOP)                   # left rail up
-                _sw_box(bm_flg_all,
-                        ox1_iec - _FLG_SIDE_W, ox1_iec,
-                        FLG_Y0_iec, FLG_Y1_iec,
-                        oz1_iec, _PSU_Z_TOP)                   # right rail up
-
             # IEC screws (2 per inlet)
             SR_iec = 0.002; ST_iec = 0.001; NS_iec = 12
             for scx_iec in [CX_iec - (IEC_CUT_W_s/2 + (IEC_FLG_W_s/2 - IEC_CUT_W_s/2)/2),
