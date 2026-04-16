@@ -4780,18 +4780,39 @@ def create_pdu(
                             _scr_z1  - _SCR1_R * 0.80, _scr_z1  + _SCR1_R * 0.80)
                 parts.append(_sw_mesh_obj(f"{name}_ear_screw_{_slbl_s}", _bm_scr1, col, 'M_DarkGrayMet'))
 
-        # ── Hero: management zone — RJ45 network port + status LEDs ──────────
+        # ── Hero: management zone — bottom-row face panel + RJ45 port ────────
         if qf["bezel"]:
             # RJ45 sits to the right of the circuit breaker in the bottom row
             _MGT_CX  = meter_cx + 0.010
             _RJ1_CZ  = _ROW_CZ                # same row as breaker
             _RJ1_OW  = 0.018;  _RJ1_OH = 0.013
             _RJ1_IW  = 0.0120; _RJ1_IH = 0.0080
-            # RJ45 bezel — open 4-bar frame so port recess is visible
-            _bm_rj1_bez = bmesh.new()
             _rj1_ow2 = _RJ1_OW / 2;  _rj1_oh2 = _RJ1_OH / 2
             _rj1_iw2 = _RJ1_IW / 2;  _rj1_ih2 = _RJ1_IH / 2
+
+            # Front face panel for the bottom row — tiled AROUND the RJ45 outer bezel
+            # so the gray PDU body face doesn't bleed through the port opening.
+            _fp_y  = fy_1u + 0.0004   # 0.4mm behind face (covers body at Y=0)
+            _fp_d  = 0.001
+            _fp_x0 = meter_cx - METER_W / 2 + 0.003
+            _fp_x1 = meter_cx + METER_W / 2 - 0.003
+            _fp_z0 = _ROW_CZ - h_pdu * 0.18
+            _fp_z1 = _ROW_CZ + h_pdu * 0.18
+            _ap_x0 = _MGT_CX - _rj1_ow2;  _ap_x1 = _MGT_CX + _rj1_ow2
+            _ap_z0 = _RJ1_CZ - _rj1_oh2;  _ap_z1 = _RJ1_CZ + _rj1_oh2
+            _bm_fp = bmesh.new()
+            def _fp(x0, x1, z0, z1):
+                if x1 > x0 and z1 > z0:
+                    _sw_box(_bm_fp, x0, x1, _fp_y, _fp_y + _fp_d, z0, z1)
+            _fp(_fp_x0, _fp_x1, _ap_z1, _fp_z1)          # above RJ45
+            _fp(_fp_x0, _fp_x1, _fp_z0, _ap_z0)          # below RJ45
+            _fp(_fp_x0, _ap_x0, _ap_z0, _ap_z1)          # left of RJ45
+            _fp(_ap_x1, _fp_x1, _ap_z0, _ap_z1)          # right of RJ45
+            parts.append(_sw_mesh_obj(f"{name}_mgt_fp", _bm_fp, col, 'M_DarkGrayMet'))
+
+            # RJ45 bezel — open 4-bar frame proud of face panel
             _rj1_fy0 = fy_1u - 0.0018;  _rj1_fy1 = fy_1u   # 1.8mm proud
+            _bm_rj1_bez = bmesh.new()
             _sw_box(_bm_rj1_bez, _MGT_CX - _rj1_ow2, _MGT_CX + _rj1_ow2,
                     _rj1_fy0, _rj1_fy1,
                     _RJ1_CZ + _rj1_ih2, _RJ1_CZ + _rj1_oh2)   # top
@@ -4805,11 +4826,12 @@ def create_pdu(
                     _rj1_fy0, _rj1_fy1,
                     _RJ1_CZ - _rj1_ih2, _RJ1_CZ + _rj1_ih2)   # right
             parts.append(_sw_mesh_obj(f"{name}_rj_bezel", _bm_rj1_bez, col, 'M_DarkGrayMet'))
-            # RJ45 dark port recess — open front, 11mm deep
-            _rx0 = _MGT_CX - _RJ1_IW / 2;  _rx1 = _MGT_CX + _RJ1_IW / 2
-            _ry0 = fy_1u;                   _ry1 = fy_1u + 0.0110   # 11mm deep
-            _rz0 = _RJ1_CZ - _RJ1_IH / 2;  _rz1 = _RJ1_CZ + _RJ1_IH / 2
-            _wt  = 0.0005   # 0.5mm wall thickness
+
+            # RJ45 port recess — open front, 11mm deep
+            _rx0 = _MGT_CX - _rj1_iw2;  _rx1 = _MGT_CX + _rj1_iw2
+            _ry0 = fy_1u;                _ry1 = fy_1u + 0.0110
+            _rz0 = _RJ1_CZ - _rj1_ih2;  _rz1 = _RJ1_CZ + _rj1_ih2
+            _wt  = 0.0005
             _bm_rj1_recess = bmesh.new()
             _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry1 - _wt, _ry1, _rz0, _rz1)  # back
             _sw_box(_bm_rj1_recess, _rx0, _rx1, _ry0, _ry1, _rz1 - _wt, _rz1)  # top
@@ -4817,16 +4839,17 @@ def create_pdu(
             _sw_box(_bm_rj1_recess, _rx0, _rx0 + _wt, _ry0, _ry1, _rz0, _rz1)  # left
             _sw_box(_bm_rj1_recess, _rx1 - _wt, _rx1, _ry0, _ry1, _rz0, _rz1)  # right
             parts.append(_sw_mesh_obj(f"{name}_rj_recess", _bm_rj1_recess, col, 'M_PlasticDark'))
-            # 8 gold contact strips — thin (0.25mm each), running front-to-back along bottom
+
+            # 8 gold contacts — 0.25mm wide, 2mm tall at the bottom of the cavity
             _bm_rj1_pins = bmesh.new()
-            _rj1_pitch = _RJ1_IW / 8          # spacing between contacts
-            _rj1_cw    = 0.00025               # 0.25mm contact width
+            _rj1_pitch = (_rx1 - _rx0) / 8
+            _rj1_cw    = 0.00025
             for _pi1 in range(8):
                 _rpx1_0 = _rx0 + _pi1 * _rj1_pitch + (_rj1_pitch - _rj1_cw) / 2
                 _rpx1_1 = _rpx1_0 + _rj1_cw
                 _sw_box(_bm_rj1_pins, _rpx1_0, _rpx1_1,
-                        fy_1u + 0.0020, fy_1u + 0.0090,
-                        _rz0 + _wt, _rz0 + 0.0060)  # rise from floor
+                        _ry0 + 0.0020, _ry0 + 0.0080,   # 2–8mm depth
+                        _rz0 + _wt, _rz0 + 0.0020)      # 2mm rise from floor
             parts.append(_sw_mesh_obj(f"{name}_rj_pins", _bm_rj1_pins, col, 'M_Gold'))
             # Two status LEDs — neat horizontal pair just below the display
             if qf["led_emissive"]:
