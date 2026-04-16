@@ -1804,16 +1804,6 @@ def create_server_chassis(
             _sw_box(bm_scr2e,ear_cx_2u-GRV2/2,ear_cx_2u+GRV2/2,SCR2_Y_E-0.0003,SCR2_Y_E,SCR2_Z_E-GRL2/2,SCR2_Z_E+GRL2/2)
             parts.append(_sw_mesh_obj(f"{name}_ear_screw_{side_label}", bm_scr2e, col, 'M_DarkGrayMet'))
 
-        if join_mesh:
-            joined_2u = _join_parts(parts, name)
-            bpy.ops.object.select_all(action='DESELECT')
-            joined_2u.select_set(True)
-            bpy.context.view_layer.objects.active = joined_2u
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.normals_make_consistent(inside=False)
-            bpy.ops.object.mode_set(mode='OBJECT')
-
     elif u_size == 3:
         # ── Hero 3U server front + rear — centred coordinate system ──────
         _sw_ensure_materials()
@@ -2427,16 +2417,6 @@ def create_server_chassis(
             _sw_box(bm_scr3e,ear_cx_3u-GRL3/2,ear_cx_3u+GRL3/2,SCR3_Y_E-0.0003,SCR3_Y_E,SCR3_Z_E-GRV3/2,SCR3_Z_E+GRV3/2)
             _sw_box(bm_scr3e,ear_cx_3u-GRV3/2,ear_cx_3u+GRV3/2,SCR3_Y_E-0.0003,SCR3_Y_E,SCR3_Z_E-GRL3/2,SCR3_Z_E+GRL3/2)
             parts.append(_sw_mesh_obj(f"{name}_ear_screw_{side_label}", bm_scr3e, col, 'M_DarkGrayMet'))
-
-        if join_mesh:
-            joined_3u = _join_parts(parts, name)
-            bpy.ops.object.select_all(action='DESELECT')
-            joined_3u.select_set(True)
-            bpy.context.view_layer.objects.active = joined_3u
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.normals_make_consistent(inside=False)
-            bpy.ops.object.mode_set(mode='OBJECT')
 
     elif u_size <= 3:
         # ── 3U front face ─────────────────────────────────────────────────
@@ -3087,12 +3067,22 @@ def create_server_chassis(
             w=w - 0.004, d=bevel_t, h=bevel_t, collection=col))
 
     # ── Join + origin ─────────────────────────────────────────────────────
-    # 1U handles its own join inside the u_size==1 block (respecting join_mesh).
-    # 2U+ always join here.
-    if u_size == 1:
-        joined = parts[0] if parts else None
+    # 1U handles join inside its own block (join already done when join_mesh=True).
+    # 2U+ respect join_mesh here: True → merge + fix normals, False → keep parts.
+    if join_mesh:
+        if u_size == 1:
+            joined = parts[0] if parts else None   # already joined above
+        else:
+            joined = _join_parts(parts, name)
+            bpy.ops.object.select_all(action='DESELECT')
+            joined.select_set(True)
+            bpy.context.view_layer.objects.active = joined
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            bpy.ops.object.mode_set(mode='OBJECT')
     else:
-        joined = _join_parts(parts, name)
+        joined = parts[0] if parts else None
 
     # ── Per-server material variation ─────────────────────────────────────
     # Always applied: keeps each chassis slightly unique even without full
