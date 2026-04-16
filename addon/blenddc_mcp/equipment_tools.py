@@ -4698,21 +4698,25 @@ def create_pdu(
         # Metered zone (left side): ammeter display + circuit breaker + LED
         meter_cx = -w_pdu / 2 + METER_W / 2
         if qf["bezel"]:
-            # Display bezel surround (dark border)
+            # Display bezel surround (dark border) — front face flush with PDU face (no protrusion)
+            _MBG_D = 0.003
             parts.append(_create_box_object(f"{name}_meter_bg",
-                cx=meter_cx, cy=fy_1u + 0.0008, cz=out_z + h_pdu * 0.12,
-                w=METER_W - 0.014, d=0.003, h=h_pdu * 0.44, collection=col,
+                cx=meter_cx, cy=fy_1u + _MBG_D / 2, cz=out_z + h_pdu * 0.16,
+                w=METER_W - 0.014, d=_MBG_D, h=h_pdu * 0.52, collection=col,
                 material='M_Black'))
-            # LCD display face (dark plastic, slightly proud of bezel)
+            # LCD display face — recessed 2 mm behind the front face
             parts.append(_create_box_object(f"{name}_meter_disp",
-                cx=meter_cx, cy=fy_1u - 0.0005, cz=out_z + h_pdu * 0.12,
-                w=METER_W - 0.022, d=0.003, h=h_pdu * 0.28, collection=col,
+                cx=meter_cx, cy=fy_1u + 0.0020, cz=out_z + h_pdu * 0.16,
+                w=METER_W - 0.022, d=0.002, h=h_pdu * 0.36, collection=col,
                 material='M_PlasticDark'))
-            # Circuit breaker button — proud disc with side walls (not a flat polygon)
+            # Bottom row: circuit breaker (left) + RJ45 port (right) side-by-side
+            # Row centre Z — safely above bottom bezel, below display
+            _ROW_CZ = out_z - h_pdu * 0.24   # ≈ 0.011 m from PDU bottom
+            # Circuit breaker button — left of row
             import math as _math
-            _BRK_R = 0.006;  _BRK_CX = meter_cx;  _BRK_CZ = out_z - h_pdu * 0.24
+            _BRK_R = 0.005;  _BRK_CX = meter_cx - 0.018;  _BRK_CZ = _ROW_CZ
             _BRK_Y0 = fy_1u - 0.0008   # rear (flush with face)
-            _BRK_Y1 = fy_1u - 0.0020   # front (1.2mm proud)
+            _BRK_Y1 = fy_1u - 0.0018   # front (1.0mm proud)
             _bm_brk = bmesh.new()
             _bvf = [_bm_brk.verts.new((_BRK_CX + _BRK_R * _math.cos(2*_math.pi*k/8),
                                         _BRK_Y1,
@@ -4727,13 +4731,13 @@ def create_pdu(
                 _n = (_k + 1) % 8
                 _bm_brk.faces.new([_bvf[_k], _bvb[_k], _bvb[_n], _bvf[_n]])  # sides
             parts.append(_sw_mesh_obj(f"{name}_breaker", _bm_brk, col, 'M_DarkGrayMet'))
-            # Power LED — only used at non-hero quality; hero adds status_leds instead
+            # Power LED — right of RJ45 in bottom row; only at non-hero quality
             if not qf.get("led_emissive", False):
                 parts.append(_create_box_object(f"{name}_pwr_led",
-                    cx=_jitter(meter_cx + 0.016, 0.002, rv),
-                    cy=fy_1u - 0.0010,
-                    cz=_jitter(out_z - h_pdu * 0.12, 0.001, rv),
-                    w=0.005, d=0.003, h=0.005, collection=col,
+                    cx=_jitter(meter_cx + 0.024, 0.001, rv),
+                    cy=fy_1u - 0.0008,
+                    cz=_jitter(_ROW_CZ, 0.001, rv),
+                    w=0.005, d=0.002, h=0.005, collection=col,
                     material='M_LED_Green'))
 
         # Mounting ears
@@ -4778,10 +4782,11 @@ def create_pdu(
 
         # ── Hero: management zone — RJ45 network port + status LEDs ──────────
         if qf["bezel"]:
-            _MGT_CX  = meter_cx   # same X centre as display
-            _RJ1_CZ  = out_z - h_pdu * 0.34   # lower quarter of PDU height
-            _RJ1_OW  = 0.020;  _RJ1_OH = 0.016
-            _RJ1_IW  = 0.0138; _RJ1_IH = 0.0092
+            # RJ45 sits to the right of the circuit breaker in the bottom row
+            _MGT_CX  = meter_cx + 0.010
+            _RJ1_CZ  = _ROW_CZ                # same row as breaker
+            _RJ1_OW  = 0.018;  _RJ1_OH = 0.013
+            _RJ1_IW  = 0.0120; _RJ1_IH = 0.0080
             # RJ45 bezel — open 4-bar frame so port recess is visible
             _bm_rj1_bez = bmesh.new()
             _rj1_ow2 = _RJ1_OW / 2;  _rj1_oh2 = _RJ1_OH / 2
