@@ -447,10 +447,11 @@ def create_server_chassis(
 
         # ── Carrier faces, vents, handles, LEDs ──────────────────────────
         if bay_cols > 0:
-            bm_carriers = bmesh.new()
-            bm_vents    = bmesh.new()
-            bm_handles  = bmesh.new()
-            bm_leds     = bmesh.new()
+            bm_carriers  = bmesh.new()
+            bm_vents     = bmesh.new()
+            bm_handles   = bmesh.new()
+            bm_leds      = bmesh.new()
+            bm_leds_write = bmesh.new()
 
             _lbl_objs_carr = []
             LABEL_SIZE = 0.0008
@@ -512,22 +513,28 @@ def create_server_chassis(
                                 cz - HDL_H_DIM / 2, cz - HDL_H_DIM / 2 + 0.0042)
 
                     if qf["led_emissive"]:
-                        # Activity LED (top-right of carrier)
-                        LED_X = cx + carrier_w / 2 - 0.0060
-                        LED_Z_pos = cz + carrier_h / 2 - 0.0035
+                        # Read LED (green) top-right, write LED (amber) directly below
+                        LED_X    = cx + carrier_w / 2 - 0.0060
+                        LED_RZ   = cz + carrier_h / 2 - 0.0035          # read Z
+                        LED_WZ   = LED_RZ - 0.0035                       # write Z, 3.5mm below
                         _sw_box(bm_leds,
                                 LED_X - 0.0012, LED_X + 0.0012,
                                 CARR_Y1 - 0.0008, CARR_Y1,
-                                LED_Z_pos - 0.0012, LED_Z_pos + 0.0012)
+                                LED_RZ - 0.0012, LED_RZ + 0.0012)
+                        _sw_box(bm_leds_write,
+                                LED_X - 0.0012, LED_X + 0.0012,
+                                CARR_Y1 - 0.0008, CARR_Y1,
+                                LED_WZ - 0.0012, LED_WZ + 0.0012)
 
                     if qf["bezel"]:
                         # Drive bay label
                         _add_carr_lbl(str(idx + 1), cx, cz + carrier_h / 2 - 0.0040)
 
-            parts.append(_sw_mesh_obj(f"{name}_carrier_faces",   bm_carriers, col, 'M_PlasticDark'))
-            parts.append(_sw_mesh_obj(f"{name}_carrier_vents",   bm_vents,    col, 'M_Black'))
-            parts.append(_sw_mesh_obj(f"{name}_carrier_handles", bm_handles,  col, 'M_Black'))
-            parts.append(_sw_mesh_obj(f"{name}_carrier_leds",    bm_leds,     col, 'M_LED_Green'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_faces",       bm_carriers,   col, 'M_PlasticDark'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_vents",       bm_vents,      col, 'M_Black'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_handles",     bm_handles,    col, 'M_Black'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_leds",        bm_leds,       col, 'M_LED_Green'))
+            parts.append(_sw_mesh_obj(f"{name}_carrier_leds_write",  bm_leds_write, col, 'M_LED_Amber'))
 
             # Bake drive bay labels
             if qf["bezel"] and _lbl_objs_carr:
