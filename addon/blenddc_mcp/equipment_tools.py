@@ -874,6 +874,24 @@ def create_server_chassis(
                         BACK_Y + 0.0025, BACK_Y + 0.0030,
                         ez, ez + _SL_H)
 
+            # Flanking exhaust slots — left and right of IEC flange, same Z band as flange
+            _FLK_FX0  = psu_cx_l - IEC_FLG_W_s / 2   # flange left X edge
+            _FLK_FX1  = psu_cx_l + IEC_FLG_W_s / 2   # flange right X edge
+            _FLK_Z0   = _IEC_CZ - IEC_FLG_H_s / 2 + 0.002
+            _FLK_Z1   = _IEC_CZ + IEC_FLG_H_s / 2 - 0.002
+            _N_FLK = 10
+            _flk_gap = max(0.0006, (_FLK_Z1 - _FLK_Z0 - _N_FLK * _SL_H) / (_N_FLK - 1))
+            for fi in range(_N_FLK):
+                fz = _FLK_Z0 + fi * (_SL_H + _flk_gap)
+                _sw_box(bm_psu_exhaust,                          # left of flange
+                        psu_x0 + 0.004, _FLK_FX0 - 0.002,
+                        BACK_Y + 0.0025, BACK_Y + 0.0030,
+                        fz, fz + _SL_H)
+                _sw_box(bm_psu_exhaust,                          # right of flange
+                        _FLK_FX1 + 0.002, psu_x1 - 0.004,
+                        BACK_Y + 0.0025, BACK_Y + 0.0030,
+                        fz, fz + _SL_H)
+
             # PSU LED
             _sw_box(bm_psu_led,
                     psu_cx_l + PSU_W_EA * 0.30, psu_cx_l + PSU_W_EA * 0.30 + 0.004,
