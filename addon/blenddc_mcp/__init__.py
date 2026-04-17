@@ -52,15 +52,31 @@ def _ensure_lib_on_path() -> None:
             os.add_dll_directory(dll_dir)
 
 
+def _get_python_executable() -> str:
+    """Return the real Python executable, not the Blender launcher binary."""
+    # Inside Blender, sys.executable is the Blender binary, not Python.
+    # sys.exec_prefix always points to the Python install root (e.g. .../5.1/python),
+    # so we can reliably find the real interpreter from there.
+    import glob as _glob
+    ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    bin_dir = os.path.join(sys.exec_prefix, "bin")
+    for name in (f"python{ver}", f"python{sys.version_info.major}", "python3", "python"):
+        candidate = os.path.join(bin_dir, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return sys.executable  # fallback (works when launched from terminal)
+
+
 def _pip_install(*packages: str) -> None:
     """Install packages into the addon's lib/ directory."""
+    python = _get_python_executable()
     os.makedirs(_LIB_DIR, exist_ok=True)
     subprocess.check_call(
-        [sys.executable, "-m", "ensurepip", "--upgrade"],
+        [python, "-m", "ensurepip", "--upgrade"],
         stderr=subprocess.DEVNULL,
     )
     subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "--quiet",
+        [python, "-m", "pip", "install", "--quiet",
          "--target", _LIB_DIR] + list(packages)
     )
 
@@ -88,6 +104,9 @@ def _ensure_dependencies() -> bool:
         else:
             _pip_install("mcp[cli]", "uvicorn[standard]")
         _ensure_lib_on_path()
+        # Flush Python's import-path cache so newly installed packages are visible.
+        import importlib
+        importlib.invalidate_caches()
         print("[BlendDC-MCP] Dependencies installed.")
         return True
     except Exception as exc:
@@ -284,6 +303,7 @@ _classes = (MCP_OT_start_server, MCP_OT_stop_server, MCP_PT_panel)
 
 
 def register():
+    _ensure_lib_on_path()
     for cls in _classes:
         bpy.utils.register_class(cls)
 
