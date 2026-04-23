@@ -4326,6 +4326,7 @@ def create_pdu(
     join_mesh:        when True join all parts into one mesh; False keeps parts separate (default)
     quality:          quality tier controlling outlet detail level
     """
+    _sw_ensure_materials()
     qf       = QUALITY_TIERS.get(quality, QUALITY_TIERS["high"])
     pdu_type = pdu_type.upper()
     if pdu_type not in ("0U", "1U"):
@@ -4652,20 +4653,46 @@ def create_pdu(
             sockets_created.append(s.name)
 
     # ═════════════════════════════════════════════════════════════════════
-    # 1U HORIZONTAL RACKMOUNT
+    # 1U HORIZONTAL RACKMOUNT — HERO BUILD
     # ═════════════════════════════════════════════════════════════════════
     else:
-        n_outlets = outlet_count if outlet_count > 0 else 8
-        h_pdu     = u_size * RACK_U_M
-        w_pdu     = EIA_EQUIPMENT_BODY_M   # 446 mm body
-        d_pdu     = 0.200
+        import math as _math
 
+        n_outlets = outlet_count if outlet_count > 0 else 8
+        h_pdu     = u_size * RACK_U_M      # 1U = 44.45 mm
+        w_pdu     = EIA_EQUIPMENT_BODY_M   # 446 mm body
+        d_pdu     = 0.070                  # 70 mm depth
+        CZ        = h_pdu / 2             # port centre height
+
+        # C13 outlet geometry constants
+        C13_HW, C13_HH = 0.030, 0.026     # housing outer dims (landscape)
+        C13_HD, C13_WT = 0.014, 0.0018    # recess depth, wall thickness
+        C13_FP, C13_FT = 0.004, 0.002     # face plate inset, face thickness
+        C13_BZW, C13_BZP = 0.0022, 0.0010 # bezel border width, bezel depth
+
+        # C14 inlet geometry constants
+        C14_W,  C14_H  = 0.032, 0.028
+        C14_D,  C14_WT = 0.016, 0.002
+
+        # Power LED constants
+        LED_W, LED_H, LED_D = 0.010, 0.010, 0.003
+
+        # Port X positions — tuned to match hero build reference
+        # Layout: [left margin][C14][26mm gap][LED][29mm gap][C13 × n][right margin]
+        C14_CX    = -w_pdu/2 + 0.033              # = -0.190
+        LED_CX    = C14_CX + C14_W/2 + 0.026 + LED_W/2  # = -0.143
+        C13_X0    = -w_pdu/2 + 0.129              # first C13 cx = -0.094
+        C13_PITCH = 0.038
+
+        outlet_xs: List[float] = []
+        for i in range(n_outlets):
+            outlet_xs.append(C13_X0 + i * C13_PITCH)
+
+        # ── Body ─────────────────────────────────────────────────────────────
+        # Solid box with front face deleted — faceplate tiles cover front surface.
         _body_obj = _create_box_object(f"{name}_body",
-            cx=0.0, cy=d_pdu / 2, cz=h_pdu / 2,
+            cx=0.0, cy=d_pdu / 2, cz=CZ,
             w=w_pdu, d=d_pdu, h=h_pdu, collection=col)
-        # Delete the body's front face (at y = -d_pdu/2 in local space = Y=0 in world).
-        # Tiled front panels (mgt_bc, out_bg, bz strips) own this surface instead,
-        # so port openings are never blocked by the solid body face.
         _bm_body = bmesh.new()
         _bm_body.from_mesh(_body_obj.data)
         _front_y_local = -(d_pdu / 2)
@@ -4677,317 +4704,173 @@ def create_pdu(
         _body_obj.data.update()
         parts.append(_body_obj)
 
-        bz_d = RACK_SHEET_THICK_M
-        bz_y = -bz_d / 2
+        # ── C13 outlet builder ────────────────────────────────────────────────
+        def _hero_c13(tag, cx, cz):
+            x0, x1 = cx - C13_HW/2, cx + C13_HW/2
+            z0, z1 = cz - C13_HH/2, cz + C13_HH/2
+            iw = C13_HW - 2*C13_WT
+            ih = C13_HH - 2*C13_WT
 
-        if qf["bezel"]:
-            parts.append(_create_box_object(f"{name}_bz_top",
-                cx=0.0, cy=bz_y, cz=h_pdu - h_pdu * 0.09,
-                w=w_pdu - 0.004, d=bz_d, h=h_pdu * 0.14, collection=col))
-            parts.append(_create_box_object(f"{name}_bz_bot",
-                cx=0.0, cy=bz_y, cz=h_pdu * 0.09,
-                w=w_pdu - 0.004, d=bz_d, h=h_pdu * 0.14, collection=col))
+            # 5-wall housing: T/B own corners, L/R cover middle only (no z-fight)
+            bm = bmesh.new()
+            _sw_box(bm, x0,          x1,          0,        C13_HD,           z1-C13_WT, z1)
+            _sw_box(bm, x0,          x1,          0,        C13_HD,           z0,        z0+C13_WT)
+            _sw_box(bm, x0,          x0+C13_WT,  0,        C13_HD,           z0+C13_WT, z1-C13_WT)
+            _sw_box(bm, x1-C13_WT,  x1,          0,        C13_HD,           z0+C13_WT, z1-C13_WT)
+            _sw_box(bm, x0,          x1,          C13_HD-C13_WT, C13_HD,     z0,        z1)
+            parts.append(_sw_mesh_obj(f"{tag}_housing", bm, col, 'M_PlasticDark'))
 
-        # ── Zone layout ───────────────────────────────────────────────────
-        # [L_MARGIN][METER_W][outlet zone][R_MARGIN][INLET_W]
-        INLET_W   = 0.052   # C14 inlet zone on right
-        METER_W   = 0.075 if qf["bezel"] else 0.0   # ammeter zone on left
-        L_MARGIN  = 0.008
-        R_MARGIN  = 0.008
-        OUT_ZONE  = w_pdu - METER_W - L_MARGIN - INLET_W - R_MARGIN
-        out_step  = OUT_ZONE / n_outlets
-        out_z     = h_pdu / 2
-        fy_1u     = -0.002
+            # Recessed face plate inside cavity
+            parts.append(_create_box_object(f"{tag}_face",
+                cx=cx, cy=C13_FP + C13_FT/2, cz=cz,
+                w=iw, d=C13_FT, h=ih, collection=col, material='M_PlasticDark'))
 
-        out_x0    = -w_pdu / 2 + METER_W + L_MARGIN
+            # 3 pin marks: E=ground (top-centre), L=line (lower-left), N=neutral (lower-right)
+            _piny = C13_FP - 0.0005
+            parts.append(_create_box_object(f"{tag}_E",
+                cx=cx,            cy=_piny, cz=cz + ih*0.22,
+                w=0.007, d=0.0010, h=0.005, collection=col, material='M_Gold'))
+            parts.append(_create_box_object(f"{tag}_L",
+                cx=cx - iw*0.25,  cy=_piny, cz=cz - ih*0.20,
+                w=0.009, d=0.0010, h=0.004, collection=col, material='M_Gold'))
+            parts.append(_create_box_object(f"{tag}_N",
+                cx=cx + iw*0.25,  cy=_piny, cz=cz - ih*0.20,
+                w=0.009, d=0.0010, h=0.004, collection=col, material='M_Gold'))
 
-        # C13 outlets — build first so outlet_xs is populated before tiling bg
-        outlet_xs: List[float] = []
-        for i in range(n_outlets):
-            ox = out_x0 + i * out_step + out_step / 2
-            ox = _jitter(ox, 0.001, rv)
-            outlet_xs.append(ox)
-            if qf["server_bays"]:
-                _c13(f"{name}_c13_{i:02d}", cx=ox, cz=out_z,
-                     fy=fy_1u, portrait=True)   # portrait: ground pin at top, matches real PDU
+            # Bezel border: T/B own corners, L/R cover middle only
+            bm2 = bmesh.new()
+            _sw_box(bm2, x0-C13_BZW, x1+C13_BZW, -C13_BZP, 0.001, z1,          z1+C13_BZW)
+            _sw_box(bm2, x0-C13_BZW, x1+C13_BZW, -C13_BZP, 0.001, z0-C13_BZW, z0)
+            _sw_box(bm2, x0-C13_BZW, x0,          -C13_BZP, 0.001, z0,          z1)
+            _sw_box(bm2, x1,          x1+C13_BZW, -C13_BZP, 0.001, z0,          z1)
+            parts.append(_sw_mesh_obj(f"{tag}_bezel", bm2, col, 'M_DarkGrayMet'))
 
-        # Recessed outlet zone background — tiled AROUND each outlet aperture
-        # Portrait C13: hw=0.034, hh=0.038, fr=0.002
-        # Outer half-extents: AP_HW = hw/2+fr = 0.019, AP_HH = hh/2+fr = 0.021
-        if qf["server_bays"]:
-            _AP_HW = 0.019   # portrait C13 outer half-width  (hw=0.034 + 2×fr=0.004)/2
-            _AP_HH = 0.021   # portrait C13 outer half-height (hh=0.038 + 2×fr=0.004)/2
-            _BG_Z0 = 0.0              # full body height — portrait outlets nearly fill 1U
-            _BG_Z1 = h_pdu
-            _BG_X0 = out_x0
-            _BG_X1 = out_x0 + OUT_ZONE
-            _AP_Z0 = out_z - _AP_HH
-            _AP_Z1 = out_z + _AP_HH
-            _BG_CY = 0.0010;  _BG_D = 0.002
+        # ── C14 inlet builder ─────────────────────────────────────────────────
+        def _hero_c14(tag, cx, cz):
+            x0, x1 = cx - C14_W/2, cx + C14_W/2
+            z0, z1 = cz - C14_H/2, cz + C14_H/2
+            iw14 = C14_W - 2*C14_WT
+            ih14 = C14_H - 2*C14_WT
 
-            def _rbg1u(x0, x1, z0, z1, idx):
-                if x1 - x0 < 0.0001 or z1 - z0 < 0.0001:
-                    return
-                parts.append(_create_box_object(f"{name}_out_bg_{idx}",
-                    cx=(x0+x1)/2, cy=_BG_CY, cz=(z0+z1)/2,
-                    w=x1-x0, d=_BG_D, h=z1-z0, collection=col))
+            # 5-wall housing: T/B own corners, L/R cover middle only
+            bm = bmesh.new()
+            _sw_box(bm, x0,          x1,          0,       C14_D,          z1-C14_WT, z1)
+            _sw_box(bm, x0,          x1,          0,       C14_D,          z0,        z0+C14_WT)
+            _sw_box(bm, x0,          x0+C14_WT,  0,       C14_D,          z0+C14_WT, z1-C14_WT)
+            _sw_box(bm, x1-C14_WT,  x1,          0,       C14_D,          z0+C14_WT, z1-C14_WT)
+            _sw_box(bm, x0,          x1,          C14_D-C14_WT, C14_D,    z0,        z1)
+            parts.append(_sw_mesh_obj(f"{tag}_housing", bm, col, 'M_PlasticDark'))
 
-            _idx_bg = [0]
-            def _bg(x0, x1, z0, z1):
-                _rbg1u(x0, x1, z0, z1, _idx_bg[0]); _idx_bg[0] += 1
+            # Recessed face plate
+            _C14_FP, _C14_FT = 0.004, 0.002
+            parts.append(_create_box_object(f"{tag}_face",
+                cx=cx, cy=_C14_FP + _C14_FT/2, cz=cz,
+                w=iw14, d=_C14_FT, h=ih14, collection=col, material='M_PlasticDark'))
 
-            # Top and bottom horizontal strips (full outlet zone width)
-            _bg(_BG_X0, _BG_X1, _AP_Z1, _BG_Z1)
-            _bg(_BG_X0, _BG_X1, _BG_Z0, _AP_Z0)
-            # Left margin (before first outlet aperture)
-            _bg(_BG_X0, outlet_xs[0] - _AP_HW, _AP_Z0, _AP_Z1)
-            # Right margin (after last outlet aperture)
-            _bg(outlet_xs[-1] + _AP_HW, _BG_X1, _AP_Z0, _AP_Z1)
-            # Inter-outlet columns
-            for _ii in range(len(outlet_xs) - 1):
-                _bg(outlet_xs[_ii] + _AP_HW, outlet_xs[_ii + 1] - _AP_HW, _AP_Z0, _AP_Z1)
+            # C14 pin marks: E=ground at bottom-centre (landscape flat bar),
+            # L=line upper-left, N=neutral upper-right — matches real IEC C14 face
+            _piny14 = _C14_FP - 0.0005
+            parts.append(_create_box_object(f"{tag}_E",
+                cx=cx,             cy=_piny14, cz=cz - ih14*0.18,
+                w=0.008, d=0.0010, h=0.004, collection=col, material='M_Gold'))
+            parts.append(_create_box_object(f"{tag}_L",
+                cx=cx - iw14*0.25, cy=_piny14, cz=cz + ih14*0.18,
+                w=0.008, d=0.0010, h=0.003, collection=col, material='M_Gold'))
+            parts.append(_create_box_object(f"{tag}_N",
+                cx=cx + iw14*0.25, cy=_piny14, cz=cz + ih14*0.18,
+                w=0.008, d=0.0010, h=0.003, collection=col, material='M_Gold'))
+            # Panel mounting screws above and below socket (as on real C14 inlets)
+            for _scr_z14, _slbl14 in [(h_pdu - 0.003, 't'), (0.003, 'b')]:
+                parts.append(_create_box_object(f"{tag}_scr_{_slbl14}",
+                    cx=cx, cy=0.0005, cz=_scr_z14,
+                    w=0.004, d=0.0008, h=0.004, collection=col, material='M_DarkGrayMet'))
 
-        # C14 inlet on right end
-        inlet_cx = w_pdu / 2 - INLET_W / 2 - R_MARGIN
-        if qf["server_bays"]:
-            _c14(f"{name}", cx=inlet_cx, cz=out_z, fy=fy_1u)
+        # ── Build ports ───────────────────────────────────────────────────────
+        _hero_c14(f"{name}_c14", C14_CX, CZ)
 
-            # Right-side body cover — R_MARGIN + inlet zone (X: out_x0+OUT_ZONE → w_pdu/2)
-            # Tiled at Y=0 (body face level) around C14 outer aperture so PDU interior
-            # doesn't show through the deleted body front face.
-            _rc_x0 = out_x0 + OUT_ZONE;  _rc_x1 = w_pdu / 2
-            _c14_hw = 0.030 / 2 + 0.002  # hw/2 + fr
-            _c14_hh = 0.024 / 2 + 0.002  # hh/2 + fr
-            _c14_ax0 = inlet_cx - _c14_hw;  _c14_ax1 = inlet_cx + _c14_hw
-            _c14_az0 = out_z    - _c14_hh;  _c14_az1 = out_z    + _c14_hh
-            _bm_rc = bmesh.new()
-            def _rc(x0, x1, z0, z1):
-                if x1 > x0 and z1 > z0:
-                    _sw_box(_bm_rc, x0, x1, -0.0002, 0.0002, z0, z1)
-            _rc(_rc_x0, _rc_x1, _c14_az1, h_pdu)      # above C14
-            _rc(_rc_x0, _rc_x1, 0.0,      _c14_az0)   # below C14
-            _rc(_rc_x0, _c14_ax0, _c14_az0, _c14_az1) # left of C14
-            _rc(_c14_ax1, _rc_x1, _c14_az0, _c14_az1) # right of C14
-            parts.append(_sw_mesh_obj(f"{name}_inlet_bc", _bm_rc, col, None))
+        parts.append(_create_box_object(f"{name}_pwr_led",
+            cx=LED_CX, cy=-LED_D/2, cz=CZ,
+            w=LED_W, d=LED_D, h=LED_H, collection=col, material='M_LED_Green'))
 
-        # Metered zone (left side): ammeter display + circuit breaker + LED
-        meter_cx = -w_pdu / 2 + METER_W / 2
-        if qf["bezel"]:
-            # Display bezel surround (dark border) — front face flush with PDU face (no protrusion)
-            _MBG_D = 0.003
-            parts.append(_create_box_object(f"{name}_meter_bg",
-                cx=meter_cx, cy=fy_1u + _MBG_D / 2, cz=out_z + h_pdu * 0.16,
-                w=METER_W - 0.014, d=_MBG_D, h=h_pdu * 0.52, collection=col,
-                material='M_Black'))
-            # LCD display face — recessed 2 mm behind the front face
-            parts.append(_create_box_object(f"{name}_meter_disp",
-                cx=meter_cx, cy=fy_1u + 0.0020, cz=out_z + h_pdu * 0.16,
-                w=METER_W - 0.022, d=0.002, h=h_pdu * 0.36, collection=col,
-                material='M_PlasticDark'))
-            # Bottom row: circuit breaker (left) + RJ45 port (right) side-by-side
-            # Row centre Z — safely above bottom bezel, below display
-            _ROW_CZ = out_z - h_pdu * 0.24   # ≈ 0.011 m from PDU bottom
-            # Circuit breaker button — left of row
-            import math as _math
-            _BRK_R = 0.005;  _BRK_CX = meter_cx - 0.018;  _BRK_CZ = _ROW_CZ
-            _BRK_Y0 = fy_1u - 0.0008   # rear (flush with face)
-            _BRK_Y1 = fy_1u - 0.0018   # front (1.0mm proud)
-            _bm_brk = bmesh.new()
-            _bvf = [_bm_brk.verts.new((_BRK_CX + _BRK_R * _math.cos(2*_math.pi*k/8),
-                                        _BRK_Y1,
-                                        _BRK_CZ + _BRK_R * _math.sin(2*_math.pi*k/8)))
-                    for k in range(8)]
-            _bvb = [_bm_brk.verts.new((_BRK_CX + _BRK_R * _math.cos(2*_math.pi*k/8),
-                                        _BRK_Y0,
-                                        _BRK_CZ + _BRK_R * _math.sin(2*_math.pi*k/8)))
-                    for k in range(8)]
-            _bm_brk.faces.new(_bvf)  # front face
-            for _k in range(8):
-                _n = (_k + 1) % 8
-                _bm_brk.faces.new([_bvf[_k], _bvb[_k], _bvb[_n], _bvf[_n]])  # sides
-            parts.append(_sw_mesh_obj(f"{name}_breaker", _bm_brk, col, 'M_DarkGrayMet'))
-            # Power LED — right of RJ45 in bottom row; only at non-hero quality
-            if not qf.get("led_emissive", False):
-                parts.append(_create_box_object(f"{name}_pwr_led",
-                    cx=_jitter(meter_cx + 0.024, 0.001, rv),
-                    cy=fy_1u - 0.0008,
-                    cz=_jitter(_ROW_CZ, 0.001, rv),
-                    w=0.005, d=0.002, h=0.005, collection=col,
-                    material='M_LED_Green'))
+        for i, _ox in enumerate(outlet_xs):
+            _hero_c13(f"{name}_c13_{i:02d}", _ox, CZ)
 
-        # Mounting ears
-        ear_w = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
-        ear_d = 0.002
-        ear_h = h_pdu * 0.68
-        for side_sign in (-1, 1):
-            side_label = 'L' if side_sign < 0 else 'R'
-            ear_cx = side_sign * (w_pdu / 2 + ear_w / 2)
-            parts.append(_create_box_object(f"{name}_ear_{side_label}",
-                cx=ear_cx, cy=-ear_d / 2, cz=h_pdu / 2,
-                w=ear_w, d=ear_d, h=ear_h, collection=col))
-            if qf["ear_screws"]:
-                parts.append(_create_box_object(f"{name}_ear_slot_{side_label}",
-                    cx=ear_cx, cy=-ear_d + 0.001, cz=h_pdu * 0.50,
-                    w=ear_w * 0.30, d=0.001, h=h_pdu * 0.22, collection=col))
+        # ── Tiled faceplate ───────────────────────────────────────────────────
+        # Solid slab at Y=0..FP_FT with rectangular holes for each port opening.
+        FP_FT  = 0.002
+        z_pb   = CZ - C13_HH/2   # bottom of C13 port band
+        z_pt   = CZ + C13_HH/2   # top of C13 port band
 
-        # ── Hero: M6 mounting screws on ears ─────────────────────────────────
-        if qf["ear_screws"] and qf["bezel"]:
-            import math as _math
-            _SCR1_R  = 0.003
-            _SCR1_Y  = -ear_d * 0.5
-            for _side_s, _slbl_s in [(-1, 'L'), (1, 'R')]:
-                _ear_cx_s = _side_s * (w_pdu / 2 + ear_w / 2)
-                _bm_scr1  = bmesh.new()
-                for _scr_z1 in [h_pdu * 0.25, h_pdu * 0.75]:
-                    _cv1 = [_bm_scr1.verts.new((
-                        _ear_cx_s + _SCR1_R * _math.cos(2 * _math.pi * _k / 8),
-                        _SCR1_Y,
-                        _scr_z1  + _SCR1_R * _math.sin(2 * _math.pi * _k / 8)))
-                        for _k in range(8)]
-                    _bm_scr1.faces.new(_cv1)
-                    _sw_box(_bm_scr1,
-                            _ear_cx_s - _SCR1_R * 0.80, _ear_cx_s + _SCR1_R * 0.80,
-                            _SCR1_Y - 0.0004, _SCR1_Y,
-                            _scr_z1  - _SCR1_R * 0.20, _scr_z1  + _SCR1_R * 0.20)
-                    _sw_box(_bm_scr1,
-                            _ear_cx_s - _SCR1_R * 0.20, _ear_cx_s + _SCR1_R * 0.20,
-                            _SCR1_Y - 0.0004, _SCR1_Y,
-                            _scr_z1  - _SCR1_R * 0.80, _scr_z1  + _SCR1_R * 0.80)
-                parts.append(_sw_mesh_obj(f"{name}_ear_screw_{_slbl_s}", _bm_scr1, col, 'M_DarkGrayMet'))
+        _x_c14_l = C14_CX - C14_W/2
+        _x_c14_r = C14_CX + C14_W/2
+        _x_led_l = LED_CX - LED_W/2
+        _x_led_r = LED_CX + LED_W/2
+        _z_led_b = CZ - LED_H/2
+        _z_led_t = CZ + LED_H/2
 
-        # ── Hero: management zone — bottom-row face panel + RJ45 port ────────
-        if qf["bezel"]:
-            # RJ45 sits to the right of the circuit breaker in the bottom row
-            _MGT_CX  = meter_cx + 0.010
-            _RJ1_CZ  = _ROW_CZ                # same row as breaker
-            _RJ1_OW  = 0.018;  _RJ1_OH = 0.013
-            _RJ1_IW  = 0.0120; _RJ1_IH = 0.0080
-            _rj1_ow2 = _RJ1_OW / 2;  _rj1_oh2 = _RJ1_OH / 2
-            _rj1_iw2 = _RJ1_IW / 2;  _rj1_ih2 = _RJ1_IH / 2
+        def _c13_xl(i): return outlet_xs[i] - C13_HW/2
+        def _c13_xr(i): return outlet_xs[i] + C13_HW/2
 
-            # Front face panel for the bottom row — tiled AROUND the RJ45 outer bezel
-            # so the gray PDU body face doesn't bleed through the port opening.
-            _fp_y  = fy_1u + 0.0004   # 0.4mm behind face (covers body at Y=0)
-            _fp_d  = 0.001
-            _fp_x0 = meter_cx - METER_W / 2 + 0.003
-            _fp_x1 = meter_cx + METER_W / 2 - 0.003
-            _fp_z0 = _ROW_CZ - h_pdu * 0.18
-            _fp_z1 = _ROW_CZ + h_pdu * 0.18
-            _ap_x0 = _MGT_CX - _rj1_ow2;  _ap_x1 = _MGT_CX + _rj1_ow2
-            _ap_z0 = _RJ1_CZ - _rj1_oh2;  _ap_z1 = _RJ1_CZ + _rj1_oh2
-            _bm_fp = bmesh.new()
-            def _fp(x0, x1, z0, z1):
-                if x1 > x0 and z1 > z0:
-                    _sw_box(_bm_fp, x0, x1, _fp_y, _fp_y + _fp_d, z0, z1)
-            _fp(_fp_x0, _fp_x1, _ap_z1, _fp_z1)          # above RJ45
-            _fp(_fp_x0, _fp_x1, _fp_z0, _ap_z0)          # below RJ45
-            _fp(_fp_x0, _ap_x0, _ap_z0, _ap_z1)          # left of RJ45
-            _fp(_ap_x1, _fp_x1, _ap_z0, _ap_z1)          # right of RJ45
-            parts.append(_sw_mesh_obj(f"{name}_mgt_fp", _bm_fp, col, 'M_DarkGrayMet'))
+        bm_fp = bmesh.new()
+        def _fp(x0, x1, z0, z1):
+            if x1 > x0 and z1 > z0:
+                _sw_box(bm_fp, x0, x1, 0, FP_FT, z0, z1)
 
-            # RJ45 housing — same approach as reference switch builder:
-            # outer shell + chamfered inner mouth + inner tunnel + flat contact pads
-            _OD   = 0.0120          # 12mm housing depth
-            _WL   = 0.0014          # 1.4mm wall (matches switch spec)
-            _IW2  = _rj1_iw2 - _WL + _rj1_ow2 - _rj1_ow2   # recompute from OW/WALL
-            _CH   = 0.0005          # 0.5mm chamfer on inner mouth
-            # actual inner half-extents from wall subtraction
-            _hiw2 = _rj1_ow2 - _WL   # 0.009 - 0.0014 = 0.0076
-            _hih2 = _rj1_oh2 - _WL   # 0.0065 - 0.0014 = 0.0051
-            _py0  = fy_1u - 0.0015   # housing front (1.5mm proud of face)
-            _py1  = _py0 + _OD       # housing back
-            _px   = _MGT_CX;  _pz = _RJ1_CZ
+        _fp(-w_pdu/2,         w_pdu/2,        0,        z_pb)           # bottom band
+        _fp(-w_pdu/2,         w_pdu/2,        z_pt,     h_pdu)          # top band
+        _fp(-w_pdu/2,         _x_c14_l,       z_pb,     z_pt)           # far left
+        _fp(_x_c14_r,         _x_led_l,       z_pb,     z_pt)           # C14 → LED
+        _fp(_x_led_l,         _x_led_r,       z_pb,     _z_led_b)       # below LED
+        _fp(_x_led_l,         _x_led_r,       _z_led_t, z_pt)           # above LED
+        _fp(_x_led_r,         _c13_xl(0),     z_pb,     z_pt)           # LED → first C13
+        for _fi in range(len(outlet_xs) - 1):
+            _fp(_c13_xr(_fi), _c13_xl(_fi+1), z_pb,     z_pt)          # between C13s
+        _fp(_c13_xr(len(outlet_xs)-1), w_pdu/2, z_pb,   z_pt)          # right margin
+        parts.append(_sw_mesh_obj(f"{name}_faceplate", bm_fp, col, 'M_DarkGrayMet'))
 
-            _bm_h = bmesh.new()
-            def _V(p): return _bm_h.verts.new(p)
-            def _Fh(vs):
-                try: _bm_h.faces.new(vs)
+        # ── Mounting ears — standard 1U (identical to servers/switches) ────────
+        ear_w   = (EIA_RAIL_SPAN_M - EIA_EQUIPMENT_BODY_M) / 2
+        ear_d   = 0.002
+        ear_h   = h_pdu * 0.68
+        SCR_R   = 0.0038
+        SCR_T   = 0.0028
+        SCR_SEG = 8
+        GRV     = 0.0006
+        GRL     = SCR_R * 1.6
+        for _ss, _sl in [(-1, 'L'), (1, 'R')]:
+            _ear_cx = _ss * (w_pdu / 2 + ear_w / 2)
+            # Ear plate — flat 2mm sheet proud of front face
+            bm_ear = bmesh.new()
+            _sw_box(bm_ear,
+                    _ear_cx - ear_w/2, _ear_cx + ear_w/2,
+                    -ear_d, 0.0,
+                    (h_pdu - ear_h)/2, (h_pdu + ear_h)/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_{_sl}", bm_ear, col, 'M_DarkGrayMet'))
+            # M6 rack screw — proper 8-sided cylinder + Phillips cross grooves
+            # Matches server chassis and switch ear geometry exactly.
+            _SCR_Y  = -(ear_d + 0.0010)
+            _SCR_Z  = h_pdu / 2
+            bm_scr  = bmesh.new()
+            _fv = []; _bv = []
+            for _i in range(SCR_SEG):
+                _a = _math.pi / SCR_SEG + 2 * _math.pi * _i / SCR_SEG
+                _fv.append(bm_scr.verts.new((_ear_cx + SCR_R*_math.cos(_a), _SCR_Y,         _SCR_Z + SCR_R*_math.sin(_a))))
+                _bv.append(bm_scr.verts.new((_ear_cx + SCR_R*_math.cos(_a), _SCR_Y + SCR_T, _SCR_Z + SCR_R*_math.sin(_a))))
+            _cf = bm_scr.verts.new((_ear_cx, _SCR_Y,         _SCR_Z))
+            _cb = bm_scr.verts.new((_ear_cx, _SCR_Y + SCR_T, _SCR_Z))
+            for _i in range(SCR_SEG):
+                _n = (_i + 1) % SCR_SEG
+                _sw_F(bm_scr, [_fv[_i], _fv[_n], _bv[_n], _bv[_i]])
+                try: bm_scr.faces.new([_cf, _fv[_n], _fv[_i]])
                 except: pass
-
-            om = [_V((_px-_rj1_ow2, _py0, _pz-_rj1_oh2)),
-                  _V((_px+_rj1_ow2, _py0, _pz-_rj1_oh2)),
-                  _V((_px+_rj1_ow2, _py0, _pz+_rj1_oh2)),
-                  _V((_px-_rj1_ow2, _py0, _pz+_rj1_oh2))]
-            im = [_V((_px-_hiw2+_CH, _py0, _pz-_hih2+_CH)),
-                  _V((_px+_hiw2-_CH, _py0, _pz-_hih2+_CH)),
-                  _V((_px+_hiw2-_CH, _py0, _pz+_hih2-_CH)),
-                  _V((_px-_hiw2+_CH, _py0, _pz+_hih2-_CH))]
-            od = [_V((_px-_rj1_ow2, _py1, _pz-_rj1_oh2)),
-                  _V((_px+_rj1_ow2, _py1, _pz-_rj1_oh2)),
-                  _V((_px+_rj1_ow2, _py1, _pz+_rj1_oh2)),
-                  _V((_px-_rj1_ow2, _py1, _pz+_rj1_oh2))]
-            ib = [_V((_px-_hiw2, _py1-_WL, _pz-_hih2)),
-                  _V((_px+_hiw2, _py1-_WL, _pz-_hih2)),
-                  _V((_px+_hiw2, _py1-_WL, _pz+_hih2)),
-                  _V((_px-_hiw2, _py1-_WL, _pz+_hih2))]
-
-            # front frame (4 chamfered annular faces)
-            _Fh([om[0],om[1],im[1],im[0]]); _Fh([om[2],om[3],im[3],im[2]])
-            _Fh([om[3],om[0],im[0],im[3]]); _Fh([om[1],om[2],im[2],im[1]])
-            # outer sides + back
-            _Fh([om[0],od[0],od[1],om[1]]); _Fh([om[2],od[2],od[3],om[3]])
-            _Fh([om[3],od[3],od[2],om[2]]); _Fh([om[3],om[0],od[0],od[3]])
-            _Fh([om[1],od[1],od[2],om[2]]); _Fh([od[0],od[3],od[2],od[1]])
-            # inner tunnel walls + back
-            _Fh([im[0],im[1],ib[1],ib[0]]); _Fh([im[2],im[3],ib[3],ib[2]])
-            _Fh([im[3],im[0],ib[0],ib[3]]); _Fh([im[1],im[2],ib[2],ib[1]])
-            _Fh([ib[0],ib[1],ib[2],ib[3]])
-            parts.append(_sw_mesh_obj(f"{name}_rj_housing", _bm_h, col, 'M_PlasticDark'))
-
-            # Body-face occlude — tiled 0.1mm in front of the solid body face (Y=0)
-            # so the body doesn't show through the inner RJ45 tunnel.
-            # Tiles the management zone around the inner aperture (_hiw2 × _hih2).
-            _bm_bc  = bmesh.new()
-            _bc_y0  = -0.0002;  _bc_y1 = 0.0002   # straddle Y=0
-            _ia_x0  = _MGT_CX - _hiw2;  _ia_x1 = _MGT_CX + _hiw2
-            _ia_z0  = _RJ1_CZ - _hih2;  _ia_z1 = _RJ1_CZ + _hih2
-            _bc_mx0 = -w_pdu / 2;       _bc_mx1 = out_x0
-            def _bc(x0, x1, z0, z1):
-                if x1 > x0 and z1 > z0:
-                    _sw_box(_bm_bc, x0, x1, _bc_y0, _bc_y1, z0, z1)
-            _bc(_bc_mx0, _bc_mx1, _ia_z1, h_pdu)   # above inner aperture
-            _bc(_bc_mx0, _bc_mx1, 0.0,    _ia_z0)  # below inner aperture
-            _bc(_bc_mx0, _ia_x0,  _ia_z0, _ia_z1)  # left of inner aperture
-            _bc(_ia_x1,  _bc_mx1, _ia_z0, _ia_z1)  # right of inner aperture
-            parts.append(_sw_mesh_obj(f"{name}_mgt_bc", _bm_bc, col, None))
-
-            # 8 gold contacts — flat pads projecting from back wall into cavity
-            _bm_c = bmesh.new()
-            _pin_y1 = _py1 - _WL - 0.0001       # flush with inner back face (tiny gap avoids z-fight)
-            _pin_y0 = _pin_y1 - 0.0003          # 0.3mm projection into tunnel
-            _pin_z0 = _pz - _hih2 + 0.0010
-            _pin_z1 = _pin_z0 + 0.0011           # 1.1mm tall
-            _pin_sp = (_hiw2 * 2) / 9            # IW / (N+1) spacing
-            for _pi1 in range(8):
-                _ppx = (_px - _hiw2) + (_pi1 + 1) * _pin_sp
-                _sw_box(_bm_c, _ppx-0.0003, _ppx+0.0003,
-                        _pin_y0, _pin_y1, _pin_z0, _pin_z1)
-            parts.append(_sw_mesh_obj(f"{name}_rj_pins", _bm_c, col, 'M_Gold'))
-            # Two status LEDs — neat horizontal pair just below the display
-            if qf["led_emissive"]:
-                _bm_sleds1 = bmesh.new()
-                _sled_z = out_z + h_pdu * 0.38   # same row as outlet LEDs
-                for _li1 in range(2):
-                    _slx = _MGT_CX - 0.006 + _li1 * 0.010
-                    _sw_box(_bm_sleds1,
-                            _slx - 0.0022, _slx + 0.0022,
-                            fy_1u - 0.0025, fy_1u,
-                            _sled_z - 0.0022, _sled_z + 0.0022)
-                parts.append(_sw_mesh_obj(f"{name}_status_leds", _bm_sleds1, col, 'M_LED_Green'))
-
-        # ── Hero: outlet label strip + per-outlet LEDs ───────────────────────
-        if qf["bezel"]:
-            parts.append(_create_box_object(f"{name}_lbl_strip",
-                cx=out_x0 + OUT_ZONE / 2, cy=fy_1u - 0.0005, cz=out_z + h_pdu * 0.38,
-                w=OUT_ZONE - 0.004, d=0.0015, h=h_pdu * 0.10, collection=col))
-            if qf["led_emissive"]:
-                _bm_oleds1 = bmesh.new()
-                for _ox1 in outlet_xs:
-                    _sw_box(_bm_oleds1,
-                            _ox1 - 0.0022, _ox1 + 0.0022,
-                            fy_1u - 0.0028, fy_1u,
-                            out_z + h_pdu * 0.35 - 0.0022, out_z + h_pdu * 0.35 + 0.0022)
-                parts.append(_sw_mesh_obj(f"{name}_outlet_leds", _bm_oleds1, col, 'M_LED_Green'))
+                try: bm_scr.faces.new([_cb, _bv[_i], _bv[_n]])
+                except: pass
+            # Phillips cross grooves recessed into the screw front face
+            _sw_box(bm_scr, _ear_cx - GRL/2, _ear_cx + GRL/2,
+                    _SCR_Y - 0.0003, _SCR_Y, _SCR_Z - GRV/2, _SCR_Z + GRV/2)
+            _sw_box(bm_scr, _ear_cx - GRV/2, _ear_cx + GRV/2,
+                    _SCR_Y - 0.0003, _SCR_Y, _SCR_Z - GRL/2, _SCR_Z + GRL/2)
+            parts.append(_sw_mesh_obj(f"{name}_ear_screw_{_sl}", bm_scr, col, 'M_DarkGrayMet'))
 
         if join_mesh:
             joined = _join_parts(parts, name)
