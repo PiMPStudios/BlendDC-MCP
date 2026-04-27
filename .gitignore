@@ -52,3 +52,7 @@ tests/output/
 
 # ── Session logs ─────────────────────────────────────────────────────────
 session_*.ndjson
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
