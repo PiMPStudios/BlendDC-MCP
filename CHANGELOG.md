@@ -151,12 +151,12 @@ EIA-310 rack cabinet geometry, rail webs, mounting rails, blanking panels, 1U/2U
 
 ---
 
-## [1.4.1] — 2026-03-xx
+## [1.4.1] — 2026-03-31
 
 ### Fixed
 - Windows dependency install for Blender 5.1 / Python 3.13
 
-## [1.4.0] — 2026-03-xx
+## [1.4.0] — 2026-03-28
 
 ### Added
 - UV unwrap, texture wiring, batch export, texture bake, and mesh edit tools

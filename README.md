@@ -35,7 +35,7 @@ create_facility_section          ← lay out a grid of bays
 
 | Module | Tools | What It Builds |
 |---|---:|---|
-| `server` (core) | 62 | Scene queries, transforms, materials, render, export primitives |
+| `server` (core) | 62 | Scene queries, transforms, materials, render, export primitives, API discovery |
 | `rack_tools` | 25 | EIA-310 rack cabinets, rails, doors, blanks, cable managers |
 | `mesh_tools` | 12 | Hard-surface mesh primitives, booleans, bevels, chamfers |
 | `gn_tools` | 7 | Geometry Nodes setups: EIA holes, perforated panels, cable bundles |
@@ -193,6 +193,8 @@ BlendDC-MCP/
 │       ├── core.py                # FastMCP instance, @thread_safe, middleware
 │       ├── constants.py           # EIA-310 dimensions, UE5 axis conventions
 │       ├── server.py              # 62 core tools + module import registry
+│       ├── discovery.py           # Blender API keyword search + disk-backed index
+│       ├── rag_store.py           # TF-IDF doc search over live bpy docstrings
 │       ├── rack_tools.py          # 25 rack cabinet tools
 │       ├── mesh_tools.py          # 12 hard-surface mesh tools
 │       ├── gn_tools.py            # 7 Geometry Nodes tools
@@ -221,6 +223,8 @@ BlendDC-MCP/
 **Copy-on-write materials** — Variation tools copy shared materials before injecting shader nodes, so identical-looking neighbours are never unintentionally modified. Injected nodes are labelled `[WEAR]`, `[DUST]`, `[DAMAGE]` for clean removal by `reset_variation`.
 
 **Self-contained modules** — Each tool module copies required helpers rather than importing from sibling modules, preventing circular import failures during server hot-reload.
+
+**Built-in API discovery** — `discover_api` and `query_api_docs` tools (backed by `discovery.py` and `rag_store.py`) let AI clients search Blender's live `bpy.ops`, `bpy.types`, and `bpy.data` by keyword or natural language before writing `execute_safe_python` code. Indexes are built once and cached to disk for instant subsequent loads.
 
 **EIA-310 compliance** — 44.45 mm per U, 482.6 mm inner rail span, rack origin at base-front-centre. All dimensions verified against real-world rack datasheets.
 

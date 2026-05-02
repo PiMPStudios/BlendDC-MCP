@@ -7,9 +7,9 @@ __pycache__/
 .eggs/
 
 # ── Build output ──────────────────────────────────────────────────────────
-dist/
 build/
 *.zip
+!dist/*.zip
 
 # ── Addon runtime dependencies ────────────────────────────────────────────
 # Installed automatically on first server start — never commit these.
