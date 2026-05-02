@@ -268,7 +268,9 @@ BlendDC-MCP is a general-purpose datacenter asset factory. Every design decision
 
 ## License
 
-[MIT License](LICENSE) — © 2026 DaRealDaHoodie
+[MIT + Commons Clause](LICENSE) — © 2026 PiMP Studios
+
+Free to use, modify, and redistribute. You may not sell the software itself or a product whose value derives substantially from it without a commercial license.
 
 ---
 
