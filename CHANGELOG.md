@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [3.0.0] — 2026-04-11
 
 ### Project rename
+
 - Renamed from **Universal Blender MCP** → **BlendDC-MCP**
 - Updated `bl_info` name, description, author (`DaRealDaHoodie`), and `doc_url`
 - N-Panel tab renamed from `MCP` → `BlendDC`
@@ -16,11 +17,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added — Phase 9: Polish, UX, Safety & Production Readiness (`polish_tools.py`, 12 tools)
 
 **Session Awareness**
+
 - `get_scene_inventory` — structured tally of all sections, bays, racks, cables, variation objects, and orphaned datablocks in the current scene
 - `log_operation` — append a timestamped entry to the in-session audit log; optional on-disk NDJSON file
 - `get_session_log` — read back session log with status filtering and formatted ASCII table output
 
 **Safety & Undo**
+
 - `push_undo_checkpoint` — push a named Blender undo step before any destructive operation; auto-recorded in session log
 - `confirm_destructive` — dry-run pre-flight for `clear_cables`, `reset_variation`, `clear_orphaned_data`, etc.; `execute=True` runs with auto-checkpoint
 - `backup_section_metadata` — serialise all collection custom properties to a JSON snapshot (metadata only, not geometry)
@@ -28,12 +31,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `quick_save_scene` — timestamped `.blend` copy via `copy=True` (working file path unchanged)
 
 **Quality of Life**
+
 - `validate_entire_scene` — single call runs `validate_facility` per section, `validate_cable_routing` scene-wide, and orphaned rack check
 - `suggest_next_step` — inspects actual scene state and returns up to 8 prioritised, pre-filled tool call recommendations
 - `list_all_tools` — all 189 registered tools grouped by module with one-line descriptions; supports module and keyword filtering
 - `export_tool_reference` — generates a full Markdown or JSON tool reference from live docstrings and parameter schemas
 
 ### Changed
+
 - Version bumped to `(3, 0, 0)` — reflects major milestone: full facility pipeline complete + production safety layer added
 - `bl_info.category` changed from `"Development"` to `"Add Mesh"`
 - Module reload order in `__init__.py` updated to include `polish_tools`
@@ -144,6 +149,7 @@ Rack equipment population (procedural + JSON-driven), equipment type registratio
 EIA-310 rack cabinet geometry, rail webs, mounting rails, blanking panels, 1U/2U/4U equipment primitives, rack doors (front/rear), cable brush strips, validate/info/export per-rack tools.
 
 ### Changed
+
 - Migrated from single-file script to modular architecture (`core.py` + per-domain tool modules)
 - Introduced `@thread_safe` decorator for all Blender API calls
 - Schema pre-warming on server start (eliminates 15-second first-call delay in LM Studio)
@@ -154,11 +160,13 @@ EIA-310 rack cabinet geometry, rail webs, mounting rails, blanking panels, 1U/2U
 ## [1.4.1] — 2026-03-31
 
 ### Fixed
+
 - Windows dependency install for Blender 5.1 / Python 3.13
 
 ## [1.4.0] — 2026-03-28
 
 ### Added
+
 - UV unwrap, texture wiring, batch export, texture bake, and mesh edit tools
 - Version display in N-Panel UI
 

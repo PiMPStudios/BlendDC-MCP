@@ -1,12 +1,12 @@
 # BlendDC-MCP
 
-### Datacenter Asset Factory
+## Datacenter Asset Factory
 
 **189 production-ready tools for building photorealistic datacenter environments in Blender — driven by any MCP-compatible AI frontend.**
 
 BlendDC-MCP is a Blender addon that starts a lightweight MCP server inside Blender's Python process. Connect Claude, Cursor, LM Studio, or any MCP client, then describe what you want to build — racks, bays, cables, variation, failure states, full facility sections — and get production-ready UE5 assets back.
 
-```
+```text
 AI Frontend  ──HTTP──▶  BlendDC-MCP Server (inside Blender)  ──bpy──▶  Blender Scene
   (Claude,              FastMCP / uvicorn                               racks, cables,
    Cursor, etc.)        http://127.0.0.1:8400/mcp                       materials, UE5…
@@ -20,7 +20,7 @@ BlendDC-MCP gives an AI 189 tools spanning the complete datacenter asset pipelin
 
 ### The Full Pipeline
 
-```
+```text
 create_facility_section          ← lay out a grid of bays
   └─ create_rack_row             ← hot-aisle / cold-aisle row pairs
        └─ create_rack_cabinet    ← EIA-310 compliant 42U cabinet (origin at base-front-centre)
@@ -132,7 +132,7 @@ Then install the zip as above.
    — no system packages required, no admin rights needed
 3. The System Console confirms:
 
-```
+```text
 [BlendDC-MCP] Schema cache ready — 189 tools in 0.01s
 [BlendDC-MCP] Server running — http://127.0.0.1:8400/mcp
 ```
@@ -140,6 +140,7 @@ Then install the zip as above.
 ### Connect Your AI Client
 
 **Claude Desktop** (`~/.claude/claude_desktop_config.json`):
+
 ```json
 {
   "mcpServers": {
@@ -171,7 +172,7 @@ OUTPUT_DIR=~/Desktop/blenddc_test python3 tests/full_pipeline_test.py
 
 The test runner covers 7 phases and prints `[PASS]` / `[WARN]` / `[FAIL]` per check with timing and a final summary. Requires only the Python standard library — no extra packages.
 
-```
+```text
 ══════════════════════════════════════════════════════════════════════
   BlendDC PIPELINE TEST SUMMARY   (14.3s total)
 ══════════════════════════════════════════════════════════════════════
@@ -185,7 +186,7 @@ The test runner covers 7 phases and prints `[PASS]` / `[WARN]` / `[FAIL]` per ch
 
 ## Architecture
 
-```
+```text
 BlendDC-MCP/
 ├── addon/
 │   └── blenddc_mcp/               # Blender addon package
