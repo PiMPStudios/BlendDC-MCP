@@ -34,7 +34,7 @@ create_facility_section          ← lay out a grid of bays
 ### 189 Tools Across 12 Modules
 
 | Module | Tools | What It Builds |
-|---|---:|---|
+| --- | ---: | --- |
 | `server` (core) | 62 | Scene queries, transforms, materials, render, export primitives, API discovery |
 | `rack_tools` | 25 | EIA-310 rack cabinets, rails, doors, blanks, cable managers |
 | `mesh_tools` | 12 | Hard-surface mesh primitives, booleans, bevels, chamfers |

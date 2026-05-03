@@ -16,13 +16,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added — Phase 9: Polish, UX, Safety & Production Readiness (`polish_tools.py`, 12 tools)
 
-**Session Awareness**
+#### Session Awareness
 
 - `get_scene_inventory` — structured tally of all sections, bays, racks, cables, variation objects, and orphaned datablocks in the current scene
 - `log_operation` — append a timestamped entry to the in-session audit log; optional on-disk NDJSON file
 - `get_session_log` — read back session log with status filtering and formatted ASCII table output
 
-**Safety & Undo**
+#### Safety & Undo
 
 - `push_undo_checkpoint` — push a named Blender undo step before any destructive operation; auto-recorded in session log
 - `confirm_destructive` — dry-run pre-flight for `clear_cables`, `reset_variation`, `clear_orphaned_data`, etc.; `execute=True` runs with auto-checkpoint
@@ -30,7 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `restore_section_metadata` — re-apply backed-up custom properties; defaults to `dry_run=True`
 - `quick_save_scene` — timestamped `.blend` copy via `copy=True` (working file path unchanged)
 
-**Quality of Life**
+#### Quality of Life
 
 - `validate_entire_scene` — single call runs `validate_facility` per section, `validate_cable_routing` scene-wide, and orphaned rack check
 - `suggest_next_step` — inspects actual scene state and returns up to 8 prioritised, pre-filled tool call recommendations
